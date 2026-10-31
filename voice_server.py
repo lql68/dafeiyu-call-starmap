@@ -282,7 +282,7 @@ def _chat_once(msgs, model, temp=0.95):
                 "messages": msgs,
                 "stream": False,
                 "keep_alive": "30m",
-                "options": {"temperature": temp, "top_p": 0.9, "num_predict": 20, **({"num_gpu": int(NUM_GPU)} if NUM_GPU else {}),
+                "options": {"temperature": temp, "top_p": 0.9, "num_predict": 14, **({"num_gpu": int(NUM_GPU)} if NUM_GPU else {}),
                             "repeat_penalty": 1.18, "stop": ["\n", "。\n"]},
             }, timeout=90)
             break
