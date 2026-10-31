@@ -18,6 +18,7 @@ r"""ai-live 的唯一入口：一个端口同时做静态服务 + 语音合成 +
 """
 import os, sys, io, json, time, wave, hashlib, subprocess, threading, argparse, traceback
 import re
+import base64
 import urllib.request, urllib.error
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -151,6 +152,45 @@ def current_cam():
             return f.read().strip()
     except Exception:
         return ""
+
+
+# ── 背景图 ────────────────────────────────────────────────
+BG_DIR = os.path.join(ROOT, "bg")
+BG_FILE = os.path.join(BG_DIR, "current.txt")
+BG_EXT = (".png", ".jpg", ".jpeg", ".webp")
+BG_MAX_BYTES = 16 * 1024 * 1024
+
+
+def list_bgs():
+    """返回 [{name, file}]，按名字排序。name 是不带扩展名的显示名。"""
+    out = []
+    try:
+        for f in sorted(os.listdir(BG_DIR)):
+            low = f.lower()
+            if low.endswith(BG_EXT):
+                out.append({"name": os.path.splitext(f)[0], "file": f})
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log(f"[bg] 列目录失败 {e!r}")
+    return out
+
+
+def current_bg():
+    try:
+        with open(BG_FILE, encoding="utf-8") as f:
+            v = f.read().strip()
+            if v:
+                return v
+    except Exception:
+        pass
+    return "room2"
+
+
+def set_bg(name):
+    os.makedirs(BG_DIR, exist_ok=True)
+    with open(BG_FILE, "w", encoding="utf-8") as f:
+        f.write(name)
 
 
 def push_inbox(text, url=None, dur=0.0, src='qq'):
@@ -508,6 +548,8 @@ class Handler(SimpleHTTPRequestHandler):
                                "vts": VTSB.status() if VTSB else {"off": True}})
         if u.path == "/api/cams":
             return self._json({"cams": list_cams(), "current": current_cam()})
+        if u.path == "/api/bgs":
+            return self._json({"list": list_bgs(), "current": current_bg()})
         if u.path == "/api/vts/status":
             return self._json(VTSB.status() if VTSB else {"off": True})
         if u.path == "/api/placeholder":
@@ -619,6 +661,58 @@ class Handler(SimpleHTTPRequestHandler):
             finally:
                 try: os.remove(tmp)
                 except OSError: pass
+
+        # ---- 背景图：切换 / 添加 ----
+        if u.path == "/api/bg":
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n) or b"{}")
+            name = (body.get("name") or "").strip()
+            names = [x["name"] for x in list_bgs()]
+            if not name or name not in names:
+                return self._json({"ok": False, "error": "no such bg",
+                                   "list": names}, 400)
+            set_bg(name)
+            log(f"[bg] 切换到 {name}")
+            return self._json({"ok": True, "current": name})
+
+        if u.path == "/api/bg/upload":
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > BG_MAX_BYTES * 2:
+                return self._json({"ok": False, "error": "too large"}, 413)
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except Exception:
+                return self._json({"ok": False, "error": "bad json"}, 400)
+            data = body.get("data") or ""
+            if not data.startswith("data:image/"):
+                return self._json({"ok": False, "error": "not an image"}, 400)
+            head, _, b64 = data.partition(",")
+            try:
+                raw = base64.b64decode(b64)
+            except Exception:
+                return self._json({"ok": False, "error": "bad base64"}, 400)
+            if len(raw) > BG_MAX_BYTES:
+                return self._json({"ok": False, "error": "too large"}, 413)
+            ext = ".png"
+            if "jpeg" in head or "jpg" in head:
+                ext = ".jpg"
+            elif "webp" in head:
+                ext = ".webp"
+            base = re.sub(r"[^0-9A-Za-z_\-]", "", (body.get("name") or "").strip())[:32]
+            if not base:
+                base = "custom" + time.strftime("%m%d%H%M%S")
+            os.makedirs(BG_DIR, exist_ok=True)
+            path = os.path.join(BG_DIR, base + ext)
+            i = 2
+            while os.path.exists(path):
+                path = os.path.join(BG_DIR, f"{base}{i}{ext}")
+                i += 1
+            with open(path, "wb") as f:
+                f.write(raw)
+            nm = os.path.splitext(os.path.basename(path))[0]
+            log(f"[bg] 添加背景 {nm} ({len(raw) // 1024} KB)")
+            return self._json({"ok": True, "name": nm,
+                               "file": os.path.basename(path)})
 
         # ---- 口型：页面按播放音频的振幅推过来 ----
         if u.path == "/api/cam":

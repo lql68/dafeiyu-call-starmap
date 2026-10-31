@@ -535,6 +535,17 @@
   .sub .en{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #sink{display:none !important}
   .frag li{white-space:nowrap}
+  .ctrl{width:1180px !important;gap:16px}
+  .bgsel{display:flex;align-items:center;gap:7px;
+    font-family:var(--mono);font-size:11px;letter-spacing:.08em}
+  .bgsel em{font-style:normal;color:var(--ink-3);font-size:10px}
+  .bgsel #bgName{min-width:78px;max-width:78px;text-align:center;color:var(--ink);
+    font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bgsel button{background:none;border:1px solid rgba(150,160,175,.26);color:var(--ink-2);
+    width:22px;height:22px;border-radius:4px;cursor:pointer;font-size:12px;line-height:1;
+    padding:0;transition:border-color .15s,color .15s}
+  .bgsel button:hover{border-color:var(--warm);color:var(--warm-hi)}
+  .bgsel button.busy{opacity:.35;pointer-events:none}
 
 </style>
 <style>
@@ -634,6 +645,14 @@
         <div class="camsel">
           <em>Cam</em>
           <select id="cams"><option>加载中…</option></select>
+        </div>
+        <div class="bgsel">
+          <em>BG</em>
+          <button id="bgPrev" title="上一张">&#8249;</button>
+          <span id="bgName">—</span>
+          <button id="bgNext" title="下一张">&#8250;</button>
+          <button id="bgAdd" title="添加一张背景图">&#65291;</button>
+          <input id="bgFile" type="file" accept="image/*" hidden>
         </div>
       </div>
       <div class="camwin">
@@ -2032,5 +2051,99 @@ setInterval(renderClock, 1000); renderClock();
 })();
 </script>
 <script src="room.js"></script>
+<script>
+/* 背景切换 / 添加 —— 走 /api/bgs、/api/bg、/api/bg/upload
+   列表来自服务端 bg/ 目录，current.txt 记住上一次选的那张。
+   URL 上带 ?bg=1|2|3 或 ?bg=room1 时以 URL 为准。 */
+(function(){
+  var bgEl = document.getElementById('roomBg');
+  var nameEl = document.getElementById('bgName');
+  var fileEl = document.getElementById('bgFile');
+  var addBtn = document.getElementById('bgAdd');
+  if(!bgEl || !nameEl || !fileEl) return;
+
+  var list = [], cur = '';
+
+  function apply(file, name){
+    bgEl.style.backgroundImage = 'url("bg/' + file + '")';
+    nameEl.textContent = name;
+    cur = name;
+  }
+
+  function remember(name){
+    return fetch('/api/bg', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name: name})
+    }).catch(function(e){ console.warn('[bg] 记住失败', e); });
+  }
+
+  function pick(item){
+    apply(item.file, item.name);
+    return remember(item.name);
+  }
+
+  function step(d){
+    if(!list.length) return;
+    var i = list.findIndex(function(x){ return x.name === cur; });
+    if(i < 0) i = 0;
+    i = (i + d + list.length) % list.length;
+    pick(list[i]);
+  }
+
+  function load(){
+    return fetch('/api/bgs', {cache:'no-store'}).then(function(r){ return r.json(); })
+      .then(function(j){
+        list = j.list || [];
+        var q = (location.search.match(/[?&]bg=([^&]+)/) || [])[1];
+        var want = null;
+        if(q && /^\d+$/.test(q)) want = 'room' + q;
+        else if(q) want = q;
+        var hit = want && list.filter(function(x){ return x.name === want; })[0];
+        if(hit){ return pick(hit); }
+        var cur2 = list.filter(function(x){ return x.name === j.current; })[0] || list[0];
+        if(cur2) apply(cur2.file, cur2.name);
+      })
+      .catch(function(e){ console.warn('[bg] 列表读取失败', e); });
+  }
+
+  document.getElementById('bgPrev').onclick = function(){ step(-1); };
+  document.getElementById('bgNext').onclick = function(){ step(1); };
+  addBtn.onclick = function(){ fileEl.click(); };
+
+  fileEl.onchange = function(){
+    var f = fileEl.files && fileEl.files[0];
+    if(!f) return;
+    addBtn.classList.add('busy');
+    nameEl.textContent = '上传中…';
+    var reader = new FileReader();
+    reader.onload = function(){
+      fetch('/api/bg/upload', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({data: reader.result,
+                              name: (f.name || '').replace(/\.[^.]+$/, '')})
+      }).then(function(r){ return r.json(); }).then(function(j){
+        if(!j.ok) throw new Error(j.error || 'upload failed');
+        return load().then(function(){
+          var hit = list.filter(function(x){ return x.name === j.name; })[0];
+          if(hit) return pick(hit);
+        });
+      }).catch(function(e){
+        nameEl.textContent = '失败';
+        console.warn('[bg] 上传失败', e);
+      }).then(function(){
+        addBtn.classList.remove('busy');
+        fileEl.value = '';
+      });
+    };
+    reader.onerror = function(){
+      nameEl.textContent = '读取失败';
+      addBtn.classList.remove('busy');
+    };
+    reader.readAsDataURL(f);
+  };
+
+  load();
+})();
+</script>
 </body>
 </html>

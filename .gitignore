@@ -37,3 +37,6 @@ obs/
 tts/refs/cover_full.wav
 .gitmsg.txt
 .git-commit-msg.txt
+
+# 背景选择是运行时状态
+/bg/current.txt
