@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>小肥鱼 · 通话页 UI 方案 A（demo）</title>
+<style>
+  :root{
+    --ink:      #C7C8CB;   /* 主文字 */
+    --ink-2:    #8A8F96;   /* 次文字 / 单位 */
+    --ink-3:    #5B626B;   /* 极弱 */
+    --line:     #3C4351;   /* 分区线 */
+    --scrim:    #262D35;   /* 冷雾 */
+    --warm:     #D9C49A;   /* 暖沙 */
+    --warm-hi:  #E4D8BE;
+    --red:      #C4553E;   /* 警示 */
+    --mono:     "JetBrains Mono", Consolas, "Courier New", monospace;
+    --sans:     "Microsoft YaHei", "PingFang SC", sans-serif;
+    --serif:    "Source Han Serif SC", "Songti SC", SimSun, serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#10141A;overflow:hidden}
+  body{font-family:var(--sans);color:var(--ink);
+       -webkit-font-smoothing:antialiased}
+
+  /* ── 舞台：固定 1920×1080，按窗口等比缩放 ───────────────── */
+  #stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;
+         transform-origin:center center;background:#141920}
+
+  /* ── 第一层：暖色房间（虚焦） ──────────────────────────── */
+  .room{position:absolute;inset:0;overflow:hidden;background:
+    linear-gradient(180deg,#4A3A28 0%,#382C1E 55%,#231B13 100%)}
+  /* 书架：一排竖条，模糊掉 */
+  .shelf{position:absolute;left:-40px;right:-40px;top:120px;height:760px;
+    filter:blur(26px);opacity:.85;
+    background:
+      repeating-linear-gradient(90deg,
+        #6B5238 0 54px, #4A3A28 54px 62px,
+        #7A5B33 62px 118px, #4A3A28 118px 126px,
+        #5E4830 126px 186px, #4A3A28 186px 194px);
+  }
+  /* 右上窗光：一大团暖光 */
+  .window{position:absolute;right:-160px;top:-220px;width:1200px;height:1000px;
+    filter:blur(86px);opacity:.95;
+    background:radial-gradient(ellipse at 62% 34%,
+      #F3E4C4 0%, #E0C99E 26%, rgba(190,160,110,.55) 52%, rgba(120,96,64,0) 78%)}
+  /* 左下地板反光 */
+  .floor{position:absolute;left:-100px;bottom:-160px;width:1400px;height:620px;
+    filter:blur(66px);opacity:.72;
+    background:radial-gradient(ellipse at 40% 60%,
+      rgba(196,150,96,.5) 0%, rgba(120,88,54,.28) 46%, rgba(0,0,0,0) 76%)}
+  /* 前景一根书架边缘（压暗，制造景深） */
+  .fg{position:absolute;left:-60px;top:0;width:300px;height:1080px;
+    filter:blur(16px);
+    background:linear-gradient(90deg,rgba(8,7,6,.94) 0%,rgba(8,7,6,.72) 52%,rgba(8,7,6,0) 100%)}
+
+  /* ── 第二层：冷雾（把暖房间压成"背景"） ────────────────── */
+  .scrim{position:absolute;inset:0;
+    background:
+      radial-gradient(ellipse at 44% 42%, rgba(38,45,53,.12) 0%, rgba(24,29,36,.40) 62%, rgba(16,20,26,.66) 100%),
+      linear-gradient(180deg, rgba(20,25,32,.50) 0%, rgba(20,25,32,.20) 40%, rgba(16,20,26,.72) 100%)}
+
+  /* ── 她 ─────────────────────────────────────────────── */
+  .her{position:absolute;left:47%;bottom:104px;transform:translateX(-50%);
+    height:770px;
+    filter:brightness(.97) saturate(.94) sepia(.07)
+           drop-shadow(0 26px 60px rgba(0,0,0,.55))}
+  /* 她脚下的地面暖光 */
+  .her-glow{position:absolute;left:47%;bottom:86px;transform:translateX(-50%);
+    width:760px;height:200px;filter:blur(52px);opacity:.5;
+    background:radial-gradient(ellipse at 50% 50%, #E6CFA4 0%, rgba(200,166,110,.4) 46%, rgba(0,0,0,0) 76%)}
+
+  /* ── HUD 通用 ───────────────────────────────────────── */
+  .hud{position:absolute;inset:0;pointer-events:none}
+  .mono{font-family:var(--mono);font-size:12px;letter-spacing:.09em;
+        text-transform:uppercase;color:var(--ink-2)}
+  .num{font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--ink)}
+
+  /* 顶部条 */
+  .top{position:absolute;left:0;right:0;top:0;height:96px;
+       border-bottom:1px solid var(--line);
+       background:linear-gradient(180deg,rgba(11,15,21,.92) 0%,rgba(11,15,21,.62) 72%,rgba(11,15,21,0) 100%)}
+  .top .cell{position:absolute;top:26px;width:270px}
+  .top .cell.l1{left:48px}
+  .top .cell.l2{left:354px}
+  .top .cell.r1{right:300px;text-align:right}
+  .top .cell.r2{right:48px;text-align:right}
+  .top .cell b{display:block;font-family:var(--mono);font-size:15px;
+       letter-spacing:.05em;color:var(--ink);font-weight:400;margin-top:3px}
+  .top .date{position:absolute;left:50%;top:36px;transform:translateX(-50%);
+       font-family:var(--mono);font-size:12px;letter-spacing:.22em;color:var(--ink-3)}
+
+  /* 左右竖列 */
+  .col{position:absolute;top:120px;bottom:104px;width:252px}
+  .col.left{left:0;padding-left:48px;width:300px;border-right:1px solid var(--line);
+       background:linear-gradient(90deg,rgba(11,15,21,.90) 0%,rgba(11,15,21,.70) 58%,rgba(11,15,21,0) 100%)}
+  .col.right{right:0;padding-right:48px;width:300px;top:326px;text-align:right;
+       background:linear-gradient(270deg,rgba(11,15,21,.90) 0%,rgba(11,15,21,.70) 58%,rgba(11,15,21,0) 100%)}
+  .row{position:relative;height:44px;padding-top:9px}
+  .row em{display:block;font-style:normal;font-family:var(--mono);font-size:10.5px;
+       letter-spacing:.13em;text-transform:uppercase;color:var(--ink-2)}
+  .row b{display:block;font-family:var(--mono);font-size:15px;font-weight:400;
+       letter-spacing:.04em;color:var(--ink);margin-top:2px}
+  .row b span{font-size:11px;color:var(--ink-2);letter-spacing:.06em}
+  .row.warm b{color:var(--warm-hi)}
+  .rule{height:1px;background:var(--line);margin:14px 0 18px}
+
+  /* 识海球 */
+  .mind{position:absolute;right:44px;top:112px;width:186px;height:186px;
+    border-radius:50%;
+    background:radial-gradient(circle,rgba(8,12,18,.92) 0%,rgba(8,12,18,.72) 62%,rgba(8,12,18,.28) 88%,rgba(8,12,18,0) 100%)}
+  #mindCv{width:186px;height:186px;display:block}
+  .mind .ring{position:absolute;inset:0;border-radius:50%;
+    border:1px solid var(--line)}
+  .mind .cap{position:absolute;left:0;right:0;bottom:9px;text-align:center;
+    font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--ink-2)}
+  .mind .cap b{color:var(--ink-2);font-weight:400}
+
+  /* 字幕（双语） */
+  .sub{position:absolute;left:0;right:0;bottom:214px;text-align:center}
+  .sub .cn{font-family:var(--serif);font-size:34px;font-weight:500;
+    letter-spacing:.04em;color:#F2EFE8;
+    text-shadow:0 2px 26px rgba(0,0,0,.92),0 0 60px rgba(0,0,0,.6)}
+  .sub .en{margin-top:9px;font-family:var(--mono);font-size:12px;
+    letter-spacing:.16em;color:#9AA1A9;text-transform:uppercase;
+    text-shadow:0 2px 14px rgba(0,0,0,.9)}
+
+  /* 底部时间轴 */
+  .foot{position:absolute;left:0;right:0;bottom:0;height:172px;
+        border-top:1px solid var(--line);
+        background:linear-gradient(0deg,rgba(11,15,21,.96) 0%,rgba(11,15,21,.80) 58%,rgba(11,15,21,.30) 88%,rgba(11,15,21,0) 100%)}
+  .foot .clock{position:absolute;left:44px;top:30px;display:flex;align-items:center}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--red);
+       margin-right:16px;box-shadow:0 0 12px rgba(196,85,62,.9)}
+  .clock b{font-family:var(--mono);font-size:30px;font-weight:400;
+       letter-spacing:.02em;color:#E7E5E0}
+  .clock b i{font-style:normal;font-size:15px;color:var(--ink-2);margin-left:3px;letter-spacing:.1em}
+  .clock .lbl{margin-left:20px;font-family:var(--mono);font-size:10.5px;
+       letter-spacing:.16em;color:var(--ink-3);text-transform:uppercase}
+  /* 进度格 */
+  .bars{position:absolute;right:44px;top:34px;display:flex;align-items:center;gap:4px}
+  .bars i{display:block;width:13px;height:15px;background:#2A313A}
+  .bars i.on{background:var(--warm)}
+  .bars .t{margin-left:14px;font-family:var(--mono);font-size:10.5px;
+       letter-spacing:.14em;color:var(--ink-3);text-transform:uppercase}
+  .bars .t b{color:var(--ink);font-weight:400}
+
+
+  /* ── 底部控制条：麦克风 / 对话框 / 摄像头 ─────────────── */
+  .foot .clock{top:20px}
+  .bars{top:24px}
+  .ctrl{position:absolute;left:50%;bottom:30px;transform:translateX(-50%);
+        display:flex;align-items:center;gap:18px;width:960px}
+  .mic{display:flex;align-items:center;gap:10px;cursor:pointer;
+       font-family:var(--mono);font-size:12px;letter-spacing:.16em;
+       color:var(--ink-2);user-select:none;padding:6px 14px 6px 2px;
+       border-right:1px solid var(--line)}
+  .mic i{width:10px;height:10px;border-radius:50%;background:#3A414B;
+         transition:background .18s,box-shadow .18s}
+  .mic.on i{background:var(--warm);box-shadow:0 0 12px rgba(217,196,154,.85)}
+  .mic.on{color:var(--warm-hi)}
+  .talk{flex:1;display:flex;align-items:center;gap:10px;
+        border-bottom:1px solid var(--line);padding-bottom:5px}
+  .talk:focus-within{border-bottom-color:var(--warm)}
+  .talk span{font-family:var(--mono);font-size:17px;color:var(--ink-3)}
+  .talk input{flex:1;background:none;border:0;outline:0;color:var(--ink);
+        font-family:var(--sans);font-size:15px;letter-spacing:.02em}
+  .talk input::placeholder{color:var(--ink-3)}
+  .talk button{background:none;border:0;outline:0;cursor:pointer;
+        font-family:var(--mono);font-size:11.5px;letter-spacing:.18em;
+        color:var(--ink-2);padding:2px 6px}
+  .talk button:hover{color:var(--warm-hi)}
+  .talk button:hover{color:var(--warm-hi)}
+  .camsel{display:flex;align-items:center;gap:8px;
+        border-left:1px solid var(--line);padding-left:14px}
+  .camsel em{font-style:normal;font-family:var(--mono);font-size:11px;
+        letter-spacing:.14em;color:var(--ink-3);text-transform:uppercase}
+  .camsel select{appearance:none;background:none;border:0;outline:0;cursor:pointer;
+        color:var(--ink);font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;
+        max-width:230px;padding-right:14px}
+  .camsel option{background:#141920;color:var(--ink)}
+
+  /* ── 摄像头小窗：验证「摄像头选择」到底切没切 ─────────── */
+  .camwin{position:absolute;right:48px;bottom:200px;width:300px;aspect-ratio:16/9;
+    border:1px solid var(--line);overflow:hidden;
+    background:radial-gradient(circle at 50% 45%,#1A2028,#0C1015);
+    box-shadow:0 12px 34px rgba(0,0,0,.45)}
+  .camwin img{width:100%;height:100%;object-fit:cover;display:block;
+    filter:brightness(.82) contrast(1.06) saturate(.9)}
+  .camwin::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 50%,rgba(0,0,0,0) 46%,rgba(0,8,18,.55) 100%)}
+  .camwin span{position:absolute;left:9px;top:7px;z-index:2;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;color:#C9D2DB;
+    text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  .camwin .dot{position:absolute;right:9px;top:9px;z-index:2;width:6px;height:6px;
+    border-radius:50%;background:var(--red);box-shadow:0 0 7px var(--red);
+    animation:beat 1.6s infinite}
+  @keyframes beat{0%,100%{opacity:1}50%{opacity:.28}}
+
+  /* demo 标记：这一版去掉（压住 ACTIVE MEMORY），需要时看页面标题 */
+  .tag{display:none}
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- 暖色房间：全部由渐变+模糊堆出来，等 ComfyUI 出真图再替换 -->
+  <div class="room">
+    <div class="shelf"></div>
+    <div class="window"></div>
+    <div class="floor"></div>
+  </div>
+
+  <!-- 她（第一版先用 Q 版立绘占位；正片是 Live2D canvas） -->
+  <div class="her-glow"></div>
+  <img class="her" src="chibi/chibi_closed.png" alt="">
+
+  <!-- 冷雾 -->
+  <div class="scrim"></div>
+  <div class="fg"></div>
+
+  <!-- ── HUD ─────────────────────────────────────── -->
+  <div class="hud">
+
+    <div class="top">
+      <div class="cell l1"><span class="mono">Memory usage</span><b id="tDocs">176 docs</b></div>
+      <div class="cell l2"><span class="mono">Recall latency</span><b id="tThink">— ms</b></div>
+      <div class="cell r1"><span class="mono">Session</span><b id="tUp">—</b></div>
+      <div class="cell r2"><span class="mono">Voice</span><b>大肥鱼 · jiling</b></div>
+      <div class="date" id="tDate">2026 · 10 · 31</div>
+    </div>
+
+    <div class="col left" id="colL"></div>
+
+    <div class="col right">
+      <div class="row warm"><em>Emotion mapping</em><b id="rEmo">平静</b></div>
+      <div class="row"><em>Smile / eyes</em><b><span id="rSmile">0%</span> · <span id="rEye">—</span></b></div>
+      <div class="row"><em>Head pose</em><b><span id="rYaw">0°</span> <span>/</span> <span id="rPitch">0°</span></b></div>
+      <div class="row"><em>Behavior</em><b id="rBeh">待机</b></div>
+      <div class="rule"></div>
+      <div class="row"><em>Environment</em><b><span id="rBright">—</span> <span>·</span> <span>24°C est</span></b></div>
+      <div class="row"><em>Camera</em><b><span id="rFps">—</span> <span>fps</span></b></div>
+    </div>
+
+    <div class="mind">
+      <canvas id="mindCv" width="432" height="432"></canvas>
+      <div class="ring"></div>
+      <div class="cap">记忆节点 <b id="mNode">1335</b> · 连线 <b id="mEdge">5278</b></div>
+    </div>
+
+    <div class="sub">
+      <div class="cn" id="sCn">先这样放着，你忙你的。</div>
+      <div class="en" id="sEn">I'll stay right here.</div>
+    </div>
+
+    <div class="foot">
+      <div class="clock">
+        <span class="dot"></span>
+        <b id="fClock">0<i>Y</i> 0<i>M</i> 2<i>D</i> 00:00:00</b>
+        <span class="lbl">Together since 2026·10·29</span>
+      </div>
+      <div class="ctrl">
+        <div class="mic on" id="mic"><i></i><span id="micTxt">MIC ON</span></div>
+        <div class="talk">
+          <span>&#8250;</span>
+          <input id="inp" placeholder="在这儿跟她说句话，回车发送">
+          <button id="send">SEND</button>
+        </div>
+        <div class="camsel">
+          <em>Cam</em>
+          <select id="cams"><option>加载中…</option></select>
+        </div>
+      </div>
+      <div class="camwin">
+        <span>CAM 01</span><i class="dot"></i>
+        <img id="camimg" src="/cam.mjpg" alt="">
+      </div>
+      <div class="bars">
+        <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        <span class="t">Active memory <b id="mRatio">69%</b></span>
+      </div>
+    </div>
+
+    <div class="tag">DEMO · 静态骨架</div>
+  </div>
+</div>
+
+<script>
+/* ── 等比缩放舞台 ─────────────────────────────────────── */
+function fit(){
+  const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+  document.getElementById('stage').style.transform =
+    'translate(-50%,-50%) scale(' + s + ')';
+}
+addEventListener('resize', fit); fit();
+
+/* ── 左列：8 项生命指标 ──────────────────────────────── */
+const LEFT = [
+  ['System initial',      () => upStr(),              ''],
+  ['Memory consolidation',() => mem.docs + ' docs',   ''],
+  ['Cognitive load',      () => (S.think || '—') + ' ms', ''],
+  ['Image analysis',      () => fpsStr(),             ''],
+  ['Speech analysis',     () => rmsStr(),             ''],
+  ['Face tracking',       () => faceStr(),            ''],
+  ['Behavior parameters', () => behStr(),             'warm'],
+  ['Environment',         () => brightStr(),          ''],
+];
+
+/* ── 真实数据 ─────────────────────────────────────────── */
+const FIRST_MET = new Date('2026-10-29T12:27:00+08:00').getTime();
+const mem = { docs: 176, atoms: 747, nodes: 1335, edges: 5278 };
+const S = { up: null, fps: null, rms: null, think: null, face: null, playing: false };
+
+function pad(n){ return String(n).padStart(2, '0'); }
+function upStr(){
+  if(S.up == null) return '—';
+  const s = Math.floor(S.up);
+  return pad(Math.floor(s/3600)) + ':' + pad(Math.floor(s%3600/60)) + ':' + pad(s%60);
+}
+function fpsStr(){ return S.fps == null ? '—' : S.fps.toFixed(1) + ' fps · 640×480'; }
+function rmsStr(){ return S.rms == null ? '—' : S.rms.toFixed(4) + ' rms'; }
+function faceStr(){
+  const f = S.face;
+  if(!f || !f.present) return 'no face';
+  return 'yaw ' + Math.round(f.yaw) + '° · pitch ' + Math.round(f.pitch) + '°';
+}
+function behStr(){
+  if(S.playing) return 'speaking';
+  const f = S.face;
+  if(f && f.present) return Math.abs(f.yaw) < 20 ? 'looking' : 'glancing';
+  return 'idle';
+}
+function brightStr(){
+  return S.bright == null ? '—' : Math.round(S.bright * 100) + '% 光';
+}
+
+function renderLeft(){
+  document.getElementById('colL').innerHTML = LEFT.map(([label, fn, cls], i) => {
+    const html = '<div class="row ' + (cls || '') + '"><em>' + label + '</em><b>' + fn() + '</b></div>';
+    return (i === 4) ? html + '<div class="rule"></div>' : html;
+  }).join('');
+}
+
+/* ── 底部：相处时间，每秒跳 ──────────────────────────── */
+function renderClock(){
+  const ms = Date.now() - FIRST_MET;
+  const total = Math.floor(ms / 1000);
+  const d = Math.floor(total / 86400);
+  const h = Math.floor(total % 86400 / 3600);
+  const m = Math.floor(total % 3600 / 60);
+  const s = total % 60;
+  const Y = Math.floor(d / 365), M = Math.floor(d % 365 / 30), D = d % 30;
+  document.getElementById('fClock').innerHTML =
+    Y + '<i>Y</i> ' + M + '<i>M</i> ' + D + '<i>D</i> ' + pad(h) + ':' + pad(m) + ':' + pad(s);
+  document.getElementById('tDate').textContent = new Date()
+    .toLocaleDateString('zh-CN', {year:'numeric', month:'2-digit', day:'2-digit'})
+    .replace(/\//g, ' · ');
+}
+
+/* ── 识海：1335 个节点 + 5278 条连线 ──────────────────── */
+(function mind(){
+  const cv = document.getElementById('mindCv');
+  const cx = cv.getContext('2d');
+  const W = cv.width, H = cv.height, C = W / 2, R = W / 2 - 8;
+
+  /* 球面均匀取点，再投到 2D（看起来像一团星云） */
+  const pts = [];
+  const N = mem.nodes;
+  for(let i = 0; i < N; i++){
+    const u = Math.random() * 2 - 1;
+    const th = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(1 - u * u);
+    pts.push([r * Math.cos(th), u, r * Math.sin(th), 0.35 + Math.random() * 0.65]);
+  }
+  /* 连线：每个节点连 3~5 条，总条数贴着 5278 */
+  const links = [];
+  const targets = mem.edges;
+  while(links.length < targets){
+    const a = (Math.random() * N) | 0;
+    const b = (Math.random() * N) | 0;
+    if(a !== b) links.push([a, b]);
+  }
+
+  let ang = 0;
+  function draw(){
+    ang += 0.0022;
+    cx.clearRect(0, 0, W, H);
+    const cos = Math.cos(ang), sin = Math.sin(ang);
+    const proj = pts.map(p => {
+      const x = p[0] * cos - p[2] * sin;
+      const z = p[0] * sin + p[2] * cos;
+      const k = 1 / (2.4 - z * 0.9);
+      return [C + x * R * 1.75 * k, C + p[1] * R * 1.75 * k, z, p[3]];
+    });
+
+    cx.lineWidth = 1.4;
+    for(const [a, b] of links){
+      const A = proj[a], B = proj[b];
+      if(A[2] < -0.55 || B[2] < -0.55) continue;      // 背面不画
+      const al = 0.03 + Math.max(0, (A[2] + B[2]) / 2) * 0.16;
+      cx.strokeStyle = 'rgba(158,178,198,' + (al * 1.6).toFixed(3) + ')';
+      cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.stroke();
+    }
+    for(const P of proj){
+      if(P[2] < -0.7) continue;
+      const r = (0.9 + P[3] * 1.5) * (0.6 + (P[2] + 1) * 0.5);
+      const a = 0.22 + (P[2] + 1) * 0.36;
+      cx.fillStyle = (P[3] > 0.82)
+        ? 'rgba(232,212,174,' + Math.min(1, a * 1.5).toFixed(3) + ')'
+        : 'rgba(206,220,234,' + Math.min(1, a * 1.25).toFixed(3) + ')';
+      cx.beginPath(); cx.arc(P[0], P[1], r * 0.86, 0, 6.284); cx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* ── 拉真实状态 ──────────────────────────────────────── */
+async function poll(){
+  try{
+    const j = await (await fetch('state-vision.json?t=' + Date.now(), {cache:'no-store'})).json();
+    S.up = j.uptime;
+    S.fps = j.video && j.video.fps;
+    S.bright = j.video && j.video.brightness;
+    S.rms = j.audio && j.audio.rms;
+    S.face = j.face;
+    S.playing = !!j.speaking;
+    S.heard = j.heard || null;
+  }catch(e){}
+  try{
+    const r = await (await fetch('/api/status', {cache:'no-store'})).json();
+    if(r.think != null) S.think = r.think;
+  }catch(e){}
+}
+
+function tick(){
+  watchHeard();
+  renderLeft();
+  document.getElementById('tUp').textContent = upStr();
+  document.getElementById('tThink').textContent = (S.think || '—') + ' ms';
+  const f = S.face;
+  document.getElementById('rEmo').textContent = f && f.present ? (f.emo || '平静') : '—';
+  document.getElementById('rSmile').textContent = f && f.present ? Math.round((f.smile || 0) * 100) + '%' : '—';
+  document.getElementById('rEye').textContent = f && f.present ? Math.round((f.eyes_open || 0) * 100) + '%' : '—';
+  document.getElementById('rYaw').textContent = f && f.present ? Math.round(f.yaw) + '°' : '—';
+  document.getElementById('rPitch').textContent = f && f.present ? Math.round(f.pitch) + '°' : '—';
+  document.getElementById('rBeh').textContent = behStr();
+  document.getElementById('rBright').textContent = brightStr();
+  document.getElementById('rFps').textContent = S.fps == null ? '—' : S.fps.toFixed(1);
+  document.getElementById('mNode').textContent = mem.nodes;
+  document.getElementById('mEdge').textContent = mem.edges;
+  document.getElementById('mRatio').textContent = Math.round(mem.atoms / (mem.nodes * 0.9) * 100) + '%';
+}
+
+
+/* ── 控制条：麦克风 / 发送 / 摄像头 ─────────────────── */
+let micOn = true;
+const micEl = document.getElementById('mic');
+micEl.addEventListener('click', () => {
+  micOn = !micOn;
+  micEl.classList.toggle('on', micOn);
+  document.getElementById('micTxt').textContent = micOn ? 'MIC ON' : 'MIC OFF';
+  if(!micOn){
+    /* 关麦：别再把她听到的东西往对话里送 */
+    document.getElementById('sEn').textContent = '— microphone off';
+  }
+});
+
+/* ── 听见 → 接话 ─────────────────────────────────────
+   state-vision.json 里的 heard.seq 每变一次就是她听到一句新的。
+   和正式页同一套逻辑：关麦就不回应。 */
+let lastHeardSeq = 0, heardInit = false, thinkBusy = false;
+
+async function respondHeard(text){
+  if(thinkBusy) return;
+  thinkBusy = true;
+  document.getElementById('sCn').textContent = '…';
+  document.getElementById('sEn').textContent = '— thinking';
+  try{
+    const r = await fetch('/api/talk', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        text: text,
+        state: {clock: new Date().toTimeString().slice(0,5),
+                bright: S.bright, face: S.face || null}
+      })
+    });
+    const j = await r.json();
+    if(j.text){
+      document.getElementById('sCn').textContent = j.text;
+      document.getElementById('sEn').textContent = '— ' + (j.ms || 0) + ' ms · ' + (j.model || '');
+      S.think = j.ms;
+    }
+  }catch(e){
+    document.getElementById('sCn').textContent = '（接不上话：' + e.message + '）';
+  }finally{
+    thinkBusy = false;
+  }
+}
+
+function watchHeard(){
+  const h = S.heard;
+  if(!h) return;
+  const seq = h.seq || 0;
+  if(!heardInit){            // 首轮只对齐，不补历史
+    heardInit = true;
+    lastHeardSeq = seq;
+    return;
+  }
+  if(seq === lastHeardSeq) return;
+  lastHeardSeq = seq;
+  const t = (h.text || '').trim();
+  if(!t) return;
+  if(!micOn){                // 关麦：她听见了也不回
+    document.getElementById('sEn').textContent = '— muted（听到了：' + t.slice(0, 12) + '…）';
+    return;
+  }
+  respondHeard(t);
+}
+
+async function sendText(){
+  const inp = document.getElementById('inp');
+  const t = (inp.value || '').trim();
+  if(!t) return;
+  inp.value = '';
+  document.getElementById('sCn').textContent = '…';
+  try{
+    const r = await fetch('/api/talk', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: t, state: {clock: new Date().toTimeString().slice(0,5)}})
+    });
+    const j = await r.json();
+    if(j.text){
+      document.getElementById('sCn').textContent = j.text;
+      document.getElementById('sEn').textContent = '— ' + (j.ms || 0) + ' ms · ' + (j.model || '');
+      S.think = j.ms;
+    }else{
+      document.getElementById('sCn').textContent = '（她没说话）';
+    }
+  }catch(e){
+    document.getElementById('sCn').textContent = '发不出去：' + e.message;
+  }
+}
+document.getElementById('send').addEventListener('click', sendText);
+document.getElementById('inp').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); sendText(); }
+});
+
+async function loadCams(){
+  const sel = document.getElementById('cams');
+  try{
+    const j = await (await fetch('/api/cams', {cache:'no-store'})).json();
+    const cur = j.current || '';
+    sel.innerHTML = (j.cams && j.cams.length)
+      ? j.cams.map(n => '<option' + (n === cur ? ' selected' : '') + '>' + n + '</option>').join('')
+      : '<option>没找到设备</option>';
+  }catch(e){
+    sel.innerHTML = '<option>枚举失败</option>';
+  }
+}
+document.getElementById('cams').addEventListener('change', async e => {
+  const name = e.target.value;
+  document.getElementById('sCn').textContent = '换摄像头…';
+  try{
+    await fetch('/api/cam', {method:'POST', headers:{'Content-Type':'application/json'},
+                             body: JSON.stringify({name: name})});
+    document.getElementById('sCn').textContent = '已经切到「' + name + '」，2 秒后画面会重连。';
+    setTimeout(() => {
+      const ci = document.getElementById('camimg');
+      if(ci) ci.src = '/cam.mjpg?t=' + Date.now();
+    }, 2500);
+  }catch(err){}
+});
+loadCams();
+
+setInterval(poll, 1200); poll();
+setInterval(tick, 500); tick();
+setInterval(renderClock, 1000); renderClock();
+</script>
+</body>
+</html>

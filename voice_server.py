@@ -17,6 +17,7 @@ r"""ai-live 的唯一入口：一个端口同时做静态服务 + 语音合成 +
 接话用 ollama 本地小模型（默认 qwen2.5:1.5b），识别用 faster-whisper 走 CPU。
 """
 import os, sys, io, json, time, wave, hashlib, subprocess, threading, argparse, traceback
+import re
 import urllib.request, urllib.error
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -97,6 +98,47 @@ _CACHE = {}
 INBOX = []
 INBOX_SEQ = [0]
 INBOX_LOCK = __import__('threading').Lock()
+
+
+FFMPEG_EXE = r"C:\Users\liu\bin\ffmpeg.exe"
+VISION_DIR = os.path.join(ROOT, "vision")
+CAM_FILE = os.path.join(VISION_DIR, "cam.txt")
+
+
+def list_cams():
+    """枚举 DirectShow 视频设备名。
+
+    直接扫 ffmpeg 的 `"名字" (video)` 行 —— 新版 ffmpeg 已经不打
+    "DirectShow video devices" 这种标题行了，按标题分段会永远得到空列表。
+    """
+    try:
+        r = subprocess.run(
+            [FFMPEG_EXE, "-hide_banner", "-list_devices", "true",
+             "-f", "dshow", "-i", "dummy"],
+            capture_output=True, text=True, timeout=25,
+            encoding="utf-8", errors="replace")
+        out = (r.stderr or "") + (r.stdout or "")
+    except Exception as e:
+        log(f"[cams] 枚举失败 {e!r}")
+        return []
+
+    cams = []
+    for line in out.splitlines():
+        m = re.search(r'"([^"]+)"\s*\((video|audio|none)\)', line)
+        if m and m.group(2) == "video":
+            n = m.group(1)
+            if n not in cams:
+                cams.append(n)
+    log(f"[cams] 找到 {len(cams)} 个视频设备: {cams}")
+    return cams
+
+
+def current_cam():
+    try:
+        with open(CAM_FILE, encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
 
 
 def push_inbox(text, url=None, dur=0.0, src='qq'):
@@ -452,6 +494,8 @@ class Handler(SimpleHTTPRequestHandler):
         if u.path == "/api/status":
             return self._json({**STATE, "cache": len(_CACHE),
                                "vts": VTSB.status() if VTSB else {"off": True}})
+        if u.path == "/api/cams":
+            return self._json({"cams": list_cams(), "current": current_cam()})
         if u.path == "/api/vts/status":
             return self._json(VTSB.status() if VTSB else {"off": True})
         if u.path == "/api/placeholder":
@@ -565,6 +609,20 @@ class Handler(SimpleHTTPRequestHandler):
                 except OSError: pass
 
         # ---- 口型：页面按播放音频的振幅推过来 ----
+        if u.path == "/api/cam":
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n) or b"{}")
+            name = (body.get("name") or "").strip()
+            if not name:
+                return self._json({"ok": False, "error": "no name"}, 400)
+            try:
+                os.makedirs(VISION_DIR, exist_ok=True)
+                with open(CAM_FILE, "w", encoding="utf-8") as f:
+                    f.write(name)
+                log(f"[cam] 切换到 {name}（vision.py 约 2 秒内重连）")
+                return self._json({"ok": True, "name": name})
+            except Exception as e:
+                return self._json({"ok": False, "error": repr(e)}, 500)
         if u.path == "/api/mouth":
             n = int(self.headers.get("Content-Length") or 0)
             try:

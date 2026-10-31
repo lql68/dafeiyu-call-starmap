@@ -39,6 +39,21 @@ YIELD = os.path.join(HERE, "yield.lock")   # 其他进程要独占摄像头时�
 
 FFMPEG = r"C:\Users\liu\bin\ffmpeg.exe"
 VIDEO_DEV = "video=HD webcam"
+
+# 摄像头可以在网页上换：写一行设备名到这里，采到下一帧就重连
+CAM_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cam.txt")
+
+
+def cur_dev():
+    """当前要用的摄像头；cam.txt 为空或读不到就退回默认"""
+    try:
+        with open(CAM_FILE, encoding="utf-8") as f:
+            n = f.read().strip()
+        if n:
+            return n if n.startswith("video=") else "video=" + n
+    except Exception:
+        pass
+    return VIDEO_DEV
 AUDIO_DEV = "audio=麦克风阵列 (Senary Audio)"
 W, H, FPS = 640, 480, 15
 FSZ = W * H * 3
@@ -112,7 +127,7 @@ def video_loop(S):
         cmd = [FFMPEG, "-hide_banner", "-loglevel", "error",
                "-f", "dshow", "-rtbufsize", "50M",
                "-video_size", f"{W}x{H}", "-framerate", str(FPS),
-               "-i", VIDEO_DEV,
+               "-i", cur_dev(),
                "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
         try:
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
@@ -122,12 +137,15 @@ def video_loop(S):
             time.sleep(2)
             continue
 
-        log(f"[video] 已启动 pid={p.pid}")
+        _dev = cur_dev()
+        log(f"[video] 已启动 pid={p.pid} dev={_dev}")
         stamps = deque(maxlen=24)       # 滑动窗口算真 fps
         fno = 0
         while not S.stop.is_set():
             if os.path.exists(YIELD):
                 log("[video] 让位：外部进程要用摄像头")
+                try: p.kill()
+                except Exception: pass
                 break
             buf = p.stdout.read(FSZ)
             if len(buf) < FSZ:
@@ -139,6 +157,11 @@ def video_loop(S):
             motion = float(np.abs(gray - prev).mean() / 255.0) if prev is not None else 0.0
             prev = gray
             fno += 1
+            if fno % 120 == 0 and cur_dev() != _dev:
+                log(f"[video] 设备切换 {_dev} -> {cur_dev()}")
+                try: p.kill()
+                except Exception: pass
+                break
             now = time.perf_counter()
             stamps.append(now)
             fps = (len(stamps) - 1) / (stamps[-1] - stamps[0]) if len(stamps) > 2 else 0.0
