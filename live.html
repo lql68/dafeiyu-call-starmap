@@ -788,7 +788,7 @@
     vid.addEventListener('loadeddata', function(){
       if(done) return;
       /* 视频来得太晚（>900ms）就别切了，canvas 已经在动，切过去反而跳 */
-      if(performance.now() - bootT0 > 900) return;
+      if(performance.now() - bootT0 > 6000) return;
       cv.classList.add('off');
       vid.classList.add('on');
       vid.play().then(function(){
@@ -874,7 +874,11 @@
         ctx.fillRect(bx, by, bw * p, bh);
 
         if(t < DUR){ requestAnimationFrame(draw); }
-        else { finish(); }
+        else {
+          /* canvas 只有 2.6 秒，视频可能还没解出首帧。
+             播完先挂着自己等视频，最多再等 2.4 秒，没等到才收场。 */
+          setTimeout(function(){ if(!done) finish(); }, 2400);
+        }
       })();
       armSkip();
     }
@@ -883,6 +887,9 @@
        再把视频挂上去；视频 900ms 内就绪才会盖上来。 */
     runCanvas();
     vid.src = 'boot/boot.mp4';
+  /* 兜底：视频要是既不 loadeddata 也不 ended（解码卡住/文件坏），
+     到点直接放行，别把人卡在启动页 */
+  setTimeout(function(){ if(!done && vid.readyState >= 2) return; if(!done) finish(); }, 12000);
     vid.load();
   })();
 
