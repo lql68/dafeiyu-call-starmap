@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>小肥鱼 · 通话中</title>
 <style>
   :root{
@@ -287,86 +288,255 @@
   .err{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
     border:1px solid #ff8a65;background:rgba(30,10,6,.94);color:#ffb4a0;
     padding:16px 22px;border-radius:5px;font-size:13px;line-height:1.7;display:none;z-index:9}
+  .l2d-wrap{position:absolute;left:47%;bottom:104px;transform:translateX(-50%);
+    height:770px;width:920px;display:flex;align-items:flex-end;justify-content:center;
+    filter:drop-shadow(0 26px 60px rgba(0,0,0,.55))}
+  #l2dCanvas{display:block;max-width:100%;max-height:100%}
+  .l2d-loading{position:absolute;left:50%;bottom:40%;transform:translateX(-50%);
+    font-family:var(--mono);font-size:11px;letter-spacing:.18em;color:var(--ink-2);
+    padding:8px 14px;border:1px solid var(--line);background:rgba(11,15,21,.7)}
+  #vtsHint{display:none}
+  .calltag{position:absolute;right:44px;top:70px;display:flex;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:var(--ink-2)}
+  .calltag .pulse{width:7px;height:7px;border-radius:50%;background:#7FD0A0;
+    box-shadow:0 0 10px rgba(127,208,160,.9);animation:callPulse 2.1s ease-in-out infinite}
+  @keyframes callPulse{0%,100%{opacity:.35}50%{opacity:1}}
+  .stamp{position:absolute;right:44px;bottom:6px;z-index:6;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--ink-3);opacity:.7}
+  .err{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:98;display:none;
+    font-family:var(--mono);font-size:11px;color:#F0B7A6;background:rgba(60,20,14,.92);
+    border:1px solid rgba(196,85,62,.5);padding:8px 14px;max-width:70vw}
+
 </style>
-</head>
-<body>
-<div class="stage">
+<style>
+  :root{
+    --ink:      #C7C8CB;   /* 主文字 */
+    --ink-2:    #8A8F96;   /* 次文字 / 单位 */
+    --ink-3:    #5B626B;   /* 极弱 */
+    --line:     #3C4351;   /* 分区线 */
+    --scrim:    #262D35;   /* 冷雾 */
+    --warm:     #D9C49A;   /* 暖沙 */
+    --warm-hi:  #E4D8BE;
+    --red:      #C4553E;   /* 警示 */
+    --mono:     "JetBrains Mono", Consolas, "Courier New", monospace;
+    --sans:     "Microsoft YaHei", "PingFang SC", sans-serif;
+    --serif:    "Source Han Serif SC", "Songti SC", SimSun, serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#10141A;overflow:hidden}
+  body{font-family:var(--sans);color:var(--ink);
+       -webkit-font-smoothing:antialiased}
 
-  <!-- 左：立绘 -->
-  <div class="avatar-cell">
-    <div class="platform"></div>
-    <div class="call-tag"><span class="pulse"></span><span id="callState">通话中 · 她正在看你</span></div>
-        <div class="l2d-wrap" id="l2dWrap">
-      <canvas id="l2dCanvas"></canvas>
-      <div id="vtsHint"><b>已交给 VTube Studio 渲染</b><span>看旁边的 VTS 窗口 · 口型与表情由这里驱动</span></div>
-        
-      <div class="l2d-loading" id="l2dLoading">加载模型…</div>
-    </div>
-  </div>
+  /* ── 舞台：固定 1920×1080，按窗口等比缩放 ───────────────── */
+  #stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;
+         transform-origin:center center;background:#141920}
 
-  <!-- 右：HUD -->
-  <aside class="hud">
-    <div class="card">
-      <h3>SSDA <span id="linkState">LINK OK</span></h3>
-      <div class="row"><em>MEMORY USAGE</em><b id="memUsage">—</b></div>
-      <div class="row"><em>AWAKE</em><b id="uptime">—</b></div>
-      <div class="row"><em>FRAME RATE</em><b id="fps">—</b></div>
-    </div>
+  /* ── 第一层：暖色房间（虚焦） ──────────────────────────── */
+  .room{position:absolute;inset:0;overflow:hidden;background:
+    linear-gradient(180deg,#4A3A28 0%,#382C1E 55%,#231B13 100%)}
+  /* 背景：ComfyUI 出的书房（?bg=1|2|3 切换对比）；room.js 那张程序化图留作兜底 */
+  #roomBg{position:absolute;inset:0;background-size:cover;background-position:center;
+    background-image:url(bg/room1.png);
+    filter:blur(2.2px) saturate(.92) brightness(.80);
+    transform:scale(1.03);transform-origin:center}
+  /* 程序化房间：默认藏起来，?bg=canvas 时用 */
+  #roomCv{position:absolute;inset:0;width:100%;height:100%;display:none;
+    filter:blur(4.5px) saturate(.94) brightness(.94);
+    transform:scale(1.04);transform-origin:center}
+  /* 书架：一排竖条，模糊掉 */
+  .shelf{position:absolute;left:-40px;right:-40px;top:120px;height:760px;
+    filter:blur(30px);opacity:.30;
+    background:
+      repeating-linear-gradient(90deg,
+        #6B5238 0 54px, #4A3A28 54px 62px,
+        #7A5B33 62px 118px, #4A3A28 118px 126px,
+        #5E4830 126px 186px, #4A3A28 186px 194px);
+  }
+  /* 右上窗光：一大团暖光 */
+  .window{position:absolute;right:-160px;top:-220px;width:1200px;height:1000px;
+    filter:blur(96px);opacity:.55;
+    background:radial-gradient(ellipse at 62% 34%,
+      #F3E4C4 0%, #E0C99E 26%, rgba(190,160,110,.55) 52%, rgba(120,96,64,0) 78%)}
+  /* 左下地板反光 */
+  .floor{position:absolute;left:-100px;bottom:-160px;width:1400px;height:620px;
+    filter:blur(74px);opacity:.42;
+    background:radial-gradient(ellipse at 40% 60%,
+      rgba(196,150,96,.5) 0%, rgba(120,88,54,.28) 46%, rgba(0,0,0,0) 76%)}
+  /* 前景一根书架边缘（压暗，制造景深） */
+  .fg{position:absolute;left:-60px;top:0;width:300px;height:1080px;
+    filter:blur(16px);
+    background:linear-gradient(90deg,rgba(8,7,6,.94) 0%,rgba(8,7,6,.72) 52%,rgba(8,7,6,0) 100%)}
 
-    <div class="card">
-      <h3>EXON / 感知 <span id="presenceState">PRESENT</span></h3>
-      <div class="row"><em>AMBIENT BRIGHTNESS</em><b id="bright">—</b></div>
-      <div class="bar"><i id="brightBar"></i></div>
-      <div class="row" style="margin-top:8px"><em>MOTION</em><b id="motion">—</b></div>
-      <div class="bar"><i id="motionBar"></i></div>
-    </div>
+  /* ── 第二层：冷雾（把暖房间压成"背景"） ────────────────── */
+  .scrim{position:absolute;inset:0;
+    background:
+      radial-gradient(ellipse at 44% 42%, rgba(38,45,53,.12) 0%, rgba(24,29,36,.40) 62%, rgba(16,20,26,.66) 100%),
+      linear-gradient(180deg, rgba(20,25,32,.50) 0%, rgba(20,25,32,.20) 40%, rgba(16,20,26,.72) 100%)}
 
-    <div class="card">
-      <h3>她的耳朵 <span id="voiceState">LISTENING</span></h3>
-      <div class="vol" id="vol"></div>
-      <div class="row" style="margin-top:6px"><em>RMS</em><b id="rms">—</b></div>
-      <div class="row"><em>听着</em><b id="heardText" style="max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</b></div>
-      <div class="row"><em>接话</em><b id="thinkMs">—</b></div>
-              <div class="row"><em>看着</em><b id="faceLook">—</b></div>
-              <div class="row"><em>表情</em><b id="faceEmo">—</b></div>
-    </div>
+  /* ── 她 ─────────────────────────────────────────────── */
+  .her{position:absolute;left:47%;bottom:104px;transform:translateX(-50%);
+    height:770px;
+    filter:brightness(.97) saturate(.94) sepia(.07)
+           drop-shadow(0 26px 60px rgba(0,0,0,.55))}
+  /* 她脚下的地面暖光 */
+  .her-glow{position:absolute;left:47%;bottom:86px;transform:translateX(-50%);
+    width:760px;height:200px;filter:blur(52px);opacity:.5;
+    background:radial-gradient(ellipse at 50% 50%, #E6CFA4 0%, rgba(200,166,110,.4) 46%, rgba(0,0,0,0) 76%)}
 
-    <div class="card" style="padding:8px">
-      <div class="cam">
-        <img id="camImg" src="/cam.mjpg" alt="">
-        <div class="scan"></div>
-        <div class="reticle"></div>
-        <div class="tag">CAM 01 · HD webcam</div>
-        <div class="tag red">LIVE</div>
-      </div>
-    </div>
-  </aside>
+  /* ── HUD 通用 ───────────────────────────────────────── */
+  .hud{position:absolute;inset:0;pointer-events:none}
+  .mono{font-family:var(--mono);font-size:12px;letter-spacing:.09em;
+        text-transform:uppercase;color:var(--ink-2)}
+  .num{font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--ink)}
 
-  <!-- 底：字幕 -->
-  <div class="subtitle-cell">
-    <div class="chatbar" id="chatbar">
-      <input id="chatInput" type="text" placeholder="在这儿跟她说话（回车发送）" autocomplete="off">
-      <button id="chatSend">发 送</button>
-    </div>
-    <div class="sub">
-      <div class="who">小肥鱼</div>
-      <div class="text" id="subText"><span class="cur"></span></div>
-    </div>
-  </div>
-</div>
-<div class="stamp">AI 生成内容 · 虚拟形象 · 模型 神宫凉子 / Live2D 霓虹猫_NeonNeko</div>
-<div class="err" id="errBox"></div>
+  /* 顶部条 */
+  .top{position:absolute;left:0;right:0;top:0;height:96px;
+       border-bottom:1px solid var(--line);
+       background:linear-gradient(180deg,rgba(11,15,21,.92) 0%,rgba(11,15,21,.62) 72%,rgba(11,15,21,0) 100%)}
+  .top .cell{position:absolute;top:26px;width:270px}
+  .top .cell.l1{left:48px}
+  .top .cell.l2{left:354px}
+  .top .cell.r1{right:300px;text-align:right}
+  .top .cell.r2{right:48px;text-align:right}
+  .top .cell b{display:block;font-family:var(--mono);font-size:15px;
+       letter-spacing:.05em;color:var(--ink);font-weight:400;margin-top:3px}
+  .top .date{position:absolute;left:50%;top:36px;transform:translateX(-50%);
+       font-family:var(--mono);font-size:12px;letter-spacing:.22em;color:var(--ink-3)}
 
-<!-- 接通闸：浏览器必须有一次用户手势才允许出声 -->
-<div class="gate" id="gate">
-  <div class="gate-in">
-    <div class="gate-dot"></div>
-    <h2>小肥鱼 正在呼叫</h2>
-    <p id="gateMsg">接通后她就看得见你，也会出声</p>
-    <button id="gateBtn">接 通</button>
-  </div>
-</div>
+  /* 左右竖列 */
+  .col{position:absolute;top:120px;bottom:104px;width:252px}
+  .col.left{left:0;padding-left:48px;width:300px;border-right:1px solid var(--line);
+       background:linear-gradient(90deg,rgba(11,15,21,.90) 0%,rgba(11,15,21,.70) 58%,rgba(11,15,21,0) 100%)}
+  .col.right{right:0;padding-right:48px;width:300px;top:392px;text-align:right;
+       background:linear-gradient(270deg,rgba(11,15,21,.90) 0%,rgba(11,15,21,.70) 58%,rgba(11,15,21,0) 100%)}
+  .row{position:relative;height:44px;padding-top:9px}
+  .row em{display:block;font-style:normal;font-family:var(--mono);font-size:10.5px;
+       letter-spacing:.13em;text-transform:uppercase;color:var(--ink-2)}
+  .row b{display:block;font-family:var(--mono);font-size:15px;font-weight:400;
+       letter-spacing:.04em;color:var(--ink);margin-top:2px}
+  .row b span{font-size:11px;color:var(--ink-2);letter-spacing:.06em}
+  .row.warm b{color:var(--warm-hi)}
+  .rule{height:1px;background:var(--line);margin:14px 0 18px}
 
+  /* 识海球 */
+  /* ── 记忆片段列表（左列下方） ────────────────────────── */
+  .frag{position:absolute;left:0;top:556px;width:300px;padding-bottom:14px;
+    background:linear-gradient(90deg,rgba(11,15,21,.90) 0%,rgba(11,15,21,.55) 64%,rgba(11,15,21,0) 100%)}
+  .frag h4{margin:0 0 9px;font-family:var(--mono);font-size:10px;font-weight:400;
+    letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3)}
+  .frag ul{margin:0;padding:0 0 0 11px;list-style:none}
+  .frag li{position:relative;padding-left:13px;margin-bottom:6px;
+    font-family:var(--sans);font-size:11px;line-height:1.62;color:var(--ink-2);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    opacity:0;animation:fragIn .9s forwards}
+  .frag li::before{content:"";position:absolute;left:0;top:.72em;width:6px;height:1px;
+    background:var(--warm);opacity:.55}
+  @keyframes fragIn{to{opacity:.92}}
+
+  .mind{position:absolute;right:48px;top:108px;width:250px;height:250px;
+    border-radius:50%;
+    background:radial-gradient(circle,rgba(8,12,18,.92) 0%,rgba(8,12,18,.72) 62%,rgba(8,12,18,.28) 88%,rgba(8,12,18,0) 100%)}
+  #mindCv{width:250px;height:250px;display:block}
+  .mind .ring{position:absolute;inset:0;border-radius:50%;
+    border:1px solid var(--line)}
+  .mind .cap{position:absolute;left:0;right:0;bottom:5px;text-align:center;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;color:var(--ink-2)}
+  .mind .cap b{color:var(--ink-2);font-weight:400}
+
+  /* 字幕（双语） */
+  .sub{position:absolute;left:0;right:0;bottom:214px;text-align:center}
+  .sub .cn{font-family:var(--serif);font-size:34px;font-weight:500;
+    letter-spacing:.04em;color:#F2EFE8;
+    text-shadow:0 2px 26px rgba(0,0,0,.92),0 0 60px rgba(0,0,0,.6)}
+  .sub .en{margin-top:9px;font-family:var(--mono);font-size:12px;
+    letter-spacing:.16em;color:#9AA1A9;text-transform:uppercase;
+    text-shadow:0 2px 14px rgba(0,0,0,.9)}
+
+  /* 底部时间轴 */
+  .foot{position:absolute;left:0;right:0;bottom:0;height:172px;
+        border-top:1px solid var(--line);
+        background:linear-gradient(0deg,rgba(11,15,21,.96) 0%,rgba(11,15,21,.80) 58%,rgba(11,15,21,.30) 88%,rgba(11,15,21,0) 100%)}
+  .foot .clock{position:absolute;left:44px;top:30px;display:flex;align-items:center}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--red);
+       margin-right:16px;box-shadow:0 0 12px rgba(196,85,62,.9)}
+  .clock b{font-family:var(--mono);font-size:30px;font-weight:400;
+       letter-spacing:.02em;color:#E7E5E0}
+  .clock b i{font-style:normal;font-size:15px;color:var(--ink-2);margin-left:3px;letter-spacing:.1em}
+  .clock .lbl{margin-left:20px;font-family:var(--mono);font-size:10.5px;
+       letter-spacing:.16em;color:var(--ink-3);text-transform:uppercase}
+  /* 进度格 */
+  .bars{position:absolute;right:44px;top:34px;display:flex;align-items:center;gap:4px}
+  .bars i{display:block;width:13px;height:15px;background:#2A313A}
+  .bars i.on{background:var(--warm)}
+  .bars .t{margin-left:14px;font-family:var(--mono);font-size:10.5px;
+       letter-spacing:.14em;color:var(--ink-3);text-transform:uppercase}
+  .bars .t b{color:var(--ink);font-weight:400}
+
+
+  /* ── 底部控制条：麦克风 / 对话框 / 摄像头 ─────────────── */
+  .foot .clock{top:20px}
+  .bars{top:24px}
+  .ctrl{position:absolute;left:50%;bottom:30px;transform:translateX(-50%);
+        display:flex;align-items:center;gap:18px;width:960px}
+  .mic{display:flex;align-items:center;gap:10px;cursor:pointer;
+       font-family:var(--mono);font-size:12px;letter-spacing:.16em;
+       color:var(--ink-2);user-select:none;padding:6px 14px 6px 2px;
+       border-right:1px solid var(--line)}
+  .mic i{width:10px;height:10px;border-radius:50%;background:#3A414B;
+         transition:background .18s,box-shadow .18s}
+  .mic.on i{background:var(--warm);box-shadow:0 0 12px rgba(217,196,154,.85)}
+  .mic.on{color:var(--warm-hi)}
+  .talk{flex:1;display:flex;align-items:center;gap:10px;
+        border-bottom:1px solid var(--line);padding-bottom:5px}
+  .talk:focus-within{border-bottom-color:var(--warm)}
+  .talk span{font-family:var(--mono);font-size:17px;color:var(--ink-3)}
+  .talk input{flex:1;background:none;border:0;outline:0;color:var(--ink);
+        font-family:var(--sans);font-size:15px;letter-spacing:.02em}
+  .talk input::placeholder{color:var(--ink-3)}
+  .talk button{background:none;border:0;outline:0;cursor:pointer;
+        font-family:var(--mono);font-size:11.5px;letter-spacing:.18em;
+        color:var(--ink-2);padding:2px 6px}
+  .talk button:hover{color:var(--warm-hi)}
+  .talk button:hover{color:var(--warm-hi)}
+  .camsel{display:flex;align-items:center;gap:8px;
+        border-left:1px solid var(--line);padding-left:14px}
+  .camsel em{font-style:normal;font-family:var(--mono);font-size:11px;
+        letter-spacing:.14em;color:var(--ink-3);text-transform:uppercase}
+  .camsel select{appearance:none;background:none;border:0;outline:0;cursor:pointer;
+        color:var(--ink);font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;
+        max-width:230px;padding-right:14px}
+  .camsel option{background:#141920;color:var(--ink)}
+
+  /* ── 摄像头小窗：验证「摄像头选择」到底切没切 ─────────── */
+  .camwin{position:absolute;right:48px;bottom:200px;width:300px;aspect-ratio:16/9;
+    border:1px solid var(--line);overflow:hidden;
+    background:radial-gradient(circle at 50% 45%,#1A2028,#0C1015);
+    box-shadow:0 12px 34px rgba(0,0,0,.45)}
+  .camwin img{width:100%;height:100%;object-fit:cover;display:block;
+    filter:brightness(.82) contrast(1.06) saturate(.9)}
+  .camwin::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 50%,rgba(0,0,0,0) 46%,rgba(0,8,18,.55) 100%)}
+  .camwin span{position:absolute;left:9px;top:7px;z-index:2;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;color:#C9D2DB;
+    text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  .camwin .dot{position:absolute;right:9px;top:9px;z-index:2;width:6px;height:6px;
+    border-radius:50%;background:var(--red);box-shadow:0 0 7px var(--red);
+    animation:beat 1.6s infinite}
+  @keyframes beat{0%,100%{opacity:1}50%{opacity:.28}}
+
+  /* demo 标记：这一版去掉（压住 ACTIVE MEMORY），需要时看页面标题 */
+  /* ── 覆盖 live 留下的显示属性（它那套是 flex 卡片，这一版是绝对定位版式） ── */
+  .hud{display:block;padding:0;gap:0;overflow:visible}
+  .row{display:block;height:auto;padding-top:0;gap:0}
+  .col.left .row{height:44px;padding-top:9px}
+  .col.right .row{height:auto;padding-top:7px;margin-bottom:3px}
+  .sub{display:block;text-align:center;padding:0;background:none;border:0;box-shadow:none;backdrop-filter:none}
+  .sub .cn{min-height:1.2em}
+  .sub .en{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #sink{display:none !important}
+  .frag li{white-space:nowrap}
+
+</style>
 <style>
 .gate{position:fixed;inset:0;z-index:99;display:flex;align-items:center;justify-content:center;
   background:radial-gradient(circle at 50% 45%,rgba(10,26,44,.86),rgba(3,8,16,.97));backdrop-filter:blur(6px);
@@ -386,7 +556,122 @@
 .gate button:hover{transform:translateY(-1px);filter:brightness(1.08)}
 .gate button:disabled{opacity:.5;cursor:default;transform:none}
 </style>
+</head>
+<body>
+<div id="stage">
 
+  <div class="room">
+    <div id="roomBg"></div>
+    <canvas id="roomCv"></canvas>
+    <div class="shelf"></div>
+    <div class="window"></div>
+    <div class="floor"></div>
+  </div>
+
+  <div class="her-glow"></div>
+  <div class="l2d-wrap" id="l2dWrap">
+    <canvas id="l2dCanvas"></canvas>
+    <div id="vtsHint"><b>已交给 VTube Studio 渲染</b><span>看旁边的 VTS 窗口</span></div>
+    <div class="l2d-loading" id="l2dLoading">加载模型…</div>
+  </div>
+
+  <div class="scrim"></div>
+  <div class="fg"></div>
+
+  <div class="hud">
+
+    <div class="top">
+      <div class="cell l1"><span class="mono">Memory usage</span><b id="tDocs">— docs</b></div>
+      <div class="cell l2"><span class="mono">Recall latency</span><b id="tThink">— ms</b></div>
+      <div class="cell r1"><span class="mono">Session</span><b id="tUp">—</b></div>
+      <div class="cell r2"><span class="mono">Voice</span><b>大肥鱼 · jiling</b></div>
+      <div class="date" id="tDate">2026 · 10 · 31</div>
+      <div class="calltag"><span class="pulse"></span><span id="callState">通话中 · 她正在看你</span></div>
+    </div>
+
+    <div class="col left" id="colL"></div>
+
+    <div class="frag" id="frag">
+      <h4>Memory fragments</h4>
+      <ul id="fragList"><li>正在读她的记忆…</li></ul>
+    </div>
+
+    <div class="col right">
+      <div class="row warm"><em>Emotion mapping</em><b id="rEmo">—</b></div>
+      <div class="row"><em>Smile / eyes</em><b><span id="rSmile">—</span> · <span id="rEye">—</span></b></div>
+      <div class="row"><em>Head pose</em><b><span id="rYaw">—</span> / <span id="rPitch">—</span></b></div>
+      <div class="row"><em>Behavior</em><b id="rBeh">—</b></div>
+      <div class="rule"></div>
+      <div class="row"><em>Heard</em><b id="rHeard">—</b></div>
+      <div class="row"><em>Recall</em><b id="rThink">—</b></div>
+
+    </div>
+
+    <div class="mind">
+      <canvas id="mindCv" width="500" height="500"></canvas>
+      <div class="ring"></div>
+      <div class="cap">记忆节点 <b id="mNode">—</b> · 连线 <b id="mEdge">—</b></div>
+    </div>
+
+    <div class="sub">
+      <div class="cn" id="subText"></div>
+      <div class="en" id="subMeta">Live2D · IndexTTS · AstrBot 大肥鱼</div>
+    </div>
+
+    <div class="foot">
+      <div class="clock">
+        <span class="dot"></span>
+        <b id="fClock">0<i>Y</i> 0<i>M</i> 2<i>D</i> 00:00:00</b>
+        <span class="lbl">Together since 2026·10·29</span>
+      </div>
+      <div class="ctrl">
+        <div class="mic on" id="mic"><i></i><span id="micTxt">MIC ON</span></div>
+        <div class="talk">
+          <span>&#8250;</span>
+          <input id="chatInput" placeholder="在这儿跟她说句话，回车发送" autocomplete="off">
+          <button id="chatSend">SEND</button>
+        </div>
+        <div class="camsel">
+          <em>Cam</em>
+          <select id="cams"><option>加载中…</option></select>
+        </div>
+      </div>
+      <div class="camwin">
+        <span>CAM 01</span><i class="dot"></i>
+        <img id="camImg" src="/cam.mjpg" alt="">
+      </div>
+      <div class="bars">
+        <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        <span class="t">Memory strength <b id="mRatio">—</b></span>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="sink" style="display:none">
+    <span id="linkState"></span><span id="memUsage"></span><span id="uptime"></span>
+    <span id="fps"></span><span id="bright"></span><span id="motion"></span><span id="rms"></span>
+    <span id="presenceState"></span><span id="voiceState"></span>
+    <span id="faceLook"></span><span id="faceEmo"></span>
+    <span id="heardText"></span><span id="thinkMs"></span>
+    <span id="rBright"></span><span id="rFps"></span>   <!-- 右列不显示，但脚本会写 -->
+    <i id="brightBar"></i><i id="motionBar"></i>
+    <div class="vol" id="vol"></div>
+  </div>
+
+  <div class="err" id="errBox"></div>
+  <div class="stamp">AI 生成内容 · 虚拟形象 · 模型 神宫凉子 / Live2D 霓虹猫_NeonNeko</div>
+</div>
+
+<div class="gate" id="gate">
+  <div class="gate-in">
+    <div class="gate-dot"></div>
+    <h2>小肥鱼 正在呼叫</h2>
+    <p id="gateMsg">接通后她就看得见你，也会出声</p>
+    <button id="gateBtn">接 通</button>
+  </div>
+</div>
 <script src="live2d/lib/live2dcubismcore.min.js"></script>
 <script src="live2d/lib/pixi.min.js"></script>
 <script src="live2d/lib/cubism4.min.js"></script>
@@ -1285,8 +1570,6 @@ if(location.search.indexOf('mouth=1') >= 0){
   setTimeout(()=>{ $('voiceState').textContent = 'TALKING'; }, 800);
 }
 </script>
-
-
 <script>
 /* 去掉鼻梁上那块多余的黑网格。
    定位方法：sdk2.html 里按「贴图不透明且很暗 + 屏幕包围盒很小」筛候选，
@@ -1337,7 +1620,6 @@ if(location.search.indexOf('mouth=1') >= 0){
   }, 300);
 })();
 </script>
-</body>
 <script>
 /* 渲染目标：默认还是 canvas；?render=vts 就把画面交给 VTube Studio */
 if(location.search.includes('render=vts')){
@@ -1345,4 +1627,410 @@ if(location.search.includes('render=vts')){
   if(location.search.includes('nohint')) document.body.classList.add('no-hint');
 }
 </script>
+<script>
+(function(){
+/* ── 等比缩放舞台 ─────────────────────────────────────── */
+function fit(){
+  const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+  document.getElementById('stage').style.transform =
+    'translate(-50%,-50%) scale(' + s + ')';
+}
+addEventListener('resize', fit); fit();
+
+/* ── 左列：8 项生命指标 ──────────────────────────────── */
+const LEFT = [
+  ['System initial',      () => upStr(),              ''],
+  ['Memory consolidation',() => mem.docs + ' docs',   ''],
+  ['Cognitive load',      () => (S.think || '—') + ' ms', ''],
+  ['Image analysis',      () => fpsStr(),             ''],
+  ['Speech analysis',     () => rmsStr(),             ''],
+  ['Face tracking',       () => faceStr(),            ''],
+  ['Behavior parameters', () => behStr(),             'warm'],
+  ['Environment',         () => brightStr(),          ''],
+];
+
+/* ── 真实数据 ─────────────────────────────────────────── */
+const FIRST_MET = new Date('2026-10-29T12:27:00+08:00').getTime();
+const mem = { docs: 176, atoms: 747, nodes: 1335, edges: 5278 };
+const S = { up: null, fps: null, rms: null, think: null, face: null, playing: false };
+
+function pad(n){ return String(n).padStart(2, '0'); }
+function upStr(){
+  if(S.up == null) return '—';
+  const s = Math.floor(S.up);
+  return pad(Math.floor(s/3600)) + ':' + pad(Math.floor(s%3600/60)) + ':' + pad(s%60);
+}
+function fpsStr(){ return S.fps == null ? '—' : S.fps.toFixed(1) + ' fps · 640×480'; }
+function rmsStr(){ return S.rms == null ? '—' : S.rms.toFixed(4) + ' rms'; }
+function faceStr(){
+  const f = S.face;
+  if(!f || !f.present) return 'no face';
+  return 'yaw ' + Math.round(f.yaw) + '° · pitch ' + Math.round(f.pitch) + '°';
+}
+function behStr(){
+  if(S.playing) return 'speaking';
+  const f = S.face;
+  if(f && f.present) return Math.abs(f.yaw) < 20 ? 'looking' : 'glancing';
+  return 'idle';
+}
+function brightStr(){
+  return S.bright == null ? '—' : Math.round(S.bright * 100) + '% 光';
+}
+
+function renderLeft(){
+  document.getElementById('colL').innerHTML = LEFT.map(([label, fn, cls], i) => {
+    const html = '<div class="row ' + (cls || '') + '"><em>' + label + '</em><b>' + fn() + '</b></div>';
+    return html;
+  }).join('');
+}
+
+/* ── 底部：相处时间，每秒跳 ──────────────────────────── */
+function renderClock(){
+  const ms = Date.now() - FIRST_MET;
+  const total = Math.floor(ms / 1000);
+  const d = Math.floor(total / 86400);
+  const h = Math.floor(total % 86400 / 3600);
+  const m = Math.floor(total % 3600 / 60);
+  const s = total % 60;
+  const Y = Math.floor(d / 365), M = Math.floor(d % 365 / 30), D = d % 30;
+  document.getElementById('fClock').innerHTML =
+    Y + '<i>Y</i> ' + M + '<i>M</i> ' + D + '<i>D</i> ' + pad(h) + ':' + pad(m) + ':' + pad(s);
+  document.getElementById('tDate').textContent = new Date()
+    .toLocaleDateString('zh-CN', {year:'numeric', month:'2-digit', day:'2-digit'})
+    .replace(/\//g, ' · ');
+}
+
+/* ── 识海：直接画 livingmemory 的真实知识图谱 ──────────────
+   数据由 gen_memory_graph.py 从 livingmemory.db 导出：
+     graph_nodes 里取度数最高的 900 个实体，沿 graph_edges 的真实边
+     做过 6 轮「弹簧 + 回归球面」，所以有关系的记忆会自己聚成团。
+   点的颜色 = 节点类型，大小 = 度数（log），亮度 = 深度 + 新近度。 */
+(function mind(){
+  const cv = document.getElementById('mindCv');
+  if(!cv) return;
+  const cx = cv.getContext('2d');
+  const W = cv.width, H = cv.height, C = W / 2, R = W / 2 - 8;
+
+  let pts = null, links = null;
+
+  /* 读不到真实图谱时退回占位星云，别开天窗 */
+  function fallback(){
+    pts = [];
+    for(let i = 0; i < 900; i++){
+      const u = Math.random() * 2 - 1, th = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(1 - u * u);
+      pts.push({x: r*Math.cos(th), y: u, z: r*Math.sin(th), d: 1, t: 6, a: 60, r: 1});
+    }
+    links = [];
+    for(let i = 0; i < 3800; i++){
+      const a = (Math.random()*900)|0, b = (Math.random()*900)|0;
+      if(a !== b) links.push([a, b, 0.5]);
+    }
+  }
+
+  const TONE = [
+    [232, 212, 174],   // topic        暖
+    [206, 220, 234],   // fact         冷
+    [176, 186, 200],   // entity
+    [214, 190, 168],   // event
+    [198, 206, 222],   // person
+    [226, 216, 198],   // preference
+    [148, 156, 170],   // other
+  ];
+
+  let ang = 0;
+
+  function draw(){
+    if(!pts){ requestAnimationFrame(draw); return; }
+    ang += 0.0022;
+    const cos = Math.cos(ang), sin = Math.sin(ang);
+    const n = pts.length;
+    const px = new Float32Array(n), py = new Float32Array(n), pz = new Float32Array(n);
+
+    for(let i = 0; i < n; i++){
+      const p = pts[i];
+      const rr = p.r == null ? 1 : p.r;        // 度数层：核心小半径、外围大半径
+      const x = p.x * cos - p.z * sin;
+      const z = p.x * sin + p.z * cos;
+      const k = 1 / (2.4 - z * 0.9);
+      px[i] = C + x * R * 1.75 * k;
+      py[i] = C + p.y * R * 1.75 * k;
+      pz[i] = z * rr;
+    }
+    cx.clearRect(0, 0, W, H);
+
+    /* 边：按平均深度分三档，每档一次 beginPath 批量描，省掉几千次状态切换 */
+    const bands = [[], [], []];
+    for(let i = 0; i < links.length; i++){
+      const a = links[i][0], b = links[i][1];
+      if(pz[a] < -0.5 && pz[b] < -0.5) continue;      // 背面整条不画
+      const zm = (pz[a] + pz[b]) * 0.5;
+      bands[zm < -0.1 ? 0 : (zm < 0.45 ? 1 : 2)].push(a, b);
+    }
+    const ALPHA = [0.05, 0.10, 0.17];
+    cx.lineWidth = 1.2;
+    for(let bi = 0; bi < 3; bi++){
+      const arr = bands[bi];
+      if(!arr.length) continue;
+      cx.strokeStyle = 'rgba(158,178,198,' + ALPHA[bi] + ')';
+      cx.beginPath();
+      for(let i = 0; i < arr.length; i += 2){
+        cx.moveTo(px[arr[i]], py[arr[i]]);
+        cx.lineTo(px[arr[i + 1]], py[arr[i + 1]]);
+      }
+      cx.stroke();
+    }
+
+    /* 点 */
+    for(let i = 0; i < n; i++){
+      if(pz[i] < -0.7) continue;
+      const p = pts[i];
+      const deg = p.d || 1;
+      const r = (0.72 + Math.log2(1 + deg) * 0.44) * (0.62 + (pz[i] + 1) * 0.46);
+      const fresh = 1 - Math.min(1, (p.a == null ? 60 : p.a) / 240);  // 越新越亮
+      const a = (0.20 + (pz[i] + 1) * 0.34) * (0.70 + fresh * 0.45);
+      const tone = TONE[p.t] || TONE[6];
+      cx.fillStyle = 'rgba(' + tone[0] + ',' + tone[1] + ',' + tone[2] + ',' +
+                     Math.min(1, a).toFixed(3) + ')';
+      cx.beginPath(); cx.arc(px[i], py[i], r, 0, 6.284); cx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+
+  (async function load(){
+    try{
+      const j = await (await fetch('memory-graph.json?t=' + Date.now(),
+                                   {cache: 'no-store'})).json();
+      if(!j.nodes || !j.nodes.length) throw new Error('图谱是空的');
+      pts = j.nodes;
+      links = j.links || [];
+      const m = j.meta || {};
+      /* 灌进 mem，tick 里写 HUD 的那几个数字就自动变真实值了
+         （原来 tick 每 500ms 把写死值覆盖回去，所以这里设了也白设） */
+      if(m.nodes_all) mem.nodes = m.nodes_all;
+      if(m.edges_all) mem.edges = m.edges_all;
+      if(m.docs_all) mem.docs = m.docs_all;
+      if(m.atoms_all) mem.atoms = m.atoms_all;
+      if(m.avg_importance != null) mem.strength = Math.round(m.avg_importance * 100);
+      /* 记忆片段：优先拿度数高的（她最在意的事），每 6 秒换一批 */
+      const pool = pts.filter(n => n.v && n.v.length > 3).map(n => ({d: n.d || 1, v: n.v}));
+      pool.sort((a, b) => b.d - a.d);
+      const hot = pool.slice(0, 240);
+      const showFrag = () => {
+        const ul = document.getElementById('fragList');
+        if(!ul) return;
+        ul.textContent = '';
+        const picks = [];
+        const used = new Set();
+        while(picks.length < 6 && picks.length < hot.length){
+          const k = (Math.random() * hot.length) | 0;
+          if(used.has(k)) continue;
+          used.add(k);
+          picks.push(hot[k]);
+        }
+        picks.forEach((it, i) => {
+          const li = document.createElement('li');
+          li.textContent = it.v;
+          li.style.animationDelay = (i * 90) + 'ms';
+          ul.appendChild(li);
+        });
+      };
+      showFrag();
+      setInterval(showFrag, 6000);
+      console.log('[mind] 真实图谱 ' + pts.length + ' 点 / ' + links.length + ' 边' +
+                  '（库内 ' + m.nodes_all + ' 点 / ' + m.edges_all + ' 边）');
+    }catch(e){
+      console.warn('[mind] 真实图谱读不到，退回占位星云：' + e.message);
+      fallback();
+    }
+  })();
+
+  draw();
+})();
+
+/* ── 拉真实状态 ──────────────────────────────────────── */
+async function poll(){
+  try{
+    const j = await (await fetch('state-vision.json?t=' + Date.now(), {cache:'no-store'})).json();
+    S.up = j.uptime;
+    S.fps = j.video && j.video.fps;
+    S.bright = j.video && j.video.brightness;
+    S.rms = j.audio && j.audio.rms;
+    S.face = j.face;
+    S.playing = !!j.speaking;
+    S.heard = j.heard || null;
+  }catch(e){}
+  try{
+    const r = await (await fetch('/api/status', {cache:'no-store'})).json();
+    if(r.think != null) S.think = r.think;
+  }catch(e){}
+}
+
+function tick(){
+  watchHeard();
+  renderLeft();
+  document.getElementById('tUp').textContent = upStr();
+  document.getElementById('tThink').textContent = (S.think || '—') + ' ms';
+  const f = S.face;
+  document.getElementById('rEmo').textContent = f && f.present ? (f.emo || '平静') : '—';
+  document.getElementById('rSmile').textContent = f && f.present ? Math.round((f.smile || 0) * 100) + '%' : '—';
+  document.getElementById('rEye').textContent = f && f.present ? Math.round((f.eyes_open || 0) * 100) + '%' : '—';
+  document.getElementById('rYaw').textContent = f && f.present ? Math.round(f.yaw) + '°' : '—';
+  document.getElementById('rPitch').textContent = f && f.present ? Math.round(f.pitch) + '°' : '—';
+  document.getElementById('rBeh').textContent = behStr();
+  document.getElementById('rBright').textContent = brightStr();
+  document.getElementById('rFps').textContent = S.fps == null ? '—' : S.fps.toFixed(1);
+  document.getElementById('mNode').textContent = mem.nodes;
+  document.getElementById('mEdge').textContent = mem.edges;
+  document.getElementById('mRatio').textContent =
+    (mem.strength != null ? mem.strength : '—') + '%';
+  const td = document.getElementById('tDocs');
+  if(td) td.textContent = mem.docs + ' docs';
+}
+
+
+/* ── 控制条：麦克风 / 发送 / 摄像头 ─────────────────── */
+let micOn = true;
+const micEl = document.getElementById('mic');
+micEl.addEventListener('click', () => {
+  micOn = !micOn;
+  micEl.classList.toggle('on', micOn);
+  document.getElementById('micTxt').textContent = micOn ? 'MIC ON' : 'MIC OFF';
+  if(!micOn){
+    /* 关麦：别再把她听到的东西往对话里送 */
+    document.getElementById('subMeta').textContent = '— microphone off';
+  }
+});
+
+/* ── 听见 → 接话 ─────────────────────────────────────
+   state-vision.json 里的 heard.seq 每变一次就是她听到一句新的。
+   和正式页同一套逻辑：关麦就不回应。 */
+let lastHeardSeq = 0, heardInit = false, thinkBusy = false;
+
+async function respondHeard(text){ return; /* 接话由正式页的 tick 负责，这里让出 */
+  if(thinkBusy) return;
+  thinkBusy = true;
+  document.getElementById('subMeta').textContent = '…';
+  document.getElementById('subMeta').textContent = '— thinking';
+  try{
+    const r = await fetch('/api/talk', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        text: text,
+        state: {clock: new Date().toTimeString().slice(0,5),
+                bright: S.bright, face: S.face || null}
+      })
+    });
+    const j = await r.json();
+    if(j.text){
+      document.getElementById('subMeta').textContent = j.text;
+      document.getElementById('subMeta').textContent = '— ' + (j.ms || 0) + ' ms · ' + (j.model || '');
+      S.think = j.ms;
+    }
+  }catch(e){
+    document.getElementById('subMeta').textContent = '（接不上话：' + e.message + '）';
+  }finally{
+    thinkBusy = false;
+  }
+}
+
+function watchHeard(){
+  const h = S.heard;
+  if(!h) return;
+  const seq = h.seq || 0;
+  if(!heardInit){            // 首轮只对齐，不补历史
+    heardInit = true;
+    lastHeardSeq = seq;
+    return;
+  }
+  if(seq === lastHeardSeq) return;
+  lastHeardSeq = seq;
+  const t = (h.text || '').trim();
+  if(!t) return;
+  if(!micOn){                // 关麦：她听见了也不回
+    document.getElementById('subMeta').textContent = '— muted（听到了：' + t.slice(0, 12) + '…）';
+    return;
+  }
+  respondHeard(t);
+}
+
+async function sendText(){ return; /* 发送由正式页的 initChatBar 负责 */
+  const inp = document.getElementById('chatInput');
+  const t = (inp.value || '').trim();
+  if(!t) return;
+  inp.value = '';
+  document.getElementById('subMeta').textContent = '…';
+  try{
+    const r = await fetch('/api/talk', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: t, state: {clock: new Date().toTimeString().slice(0,5)}})
+    });
+    const j = await r.json();
+    if(j.text){
+      document.getElementById('subMeta').textContent = j.text;
+      document.getElementById('subMeta').textContent = '— ' + (j.ms || 0) + ' ms · ' + (j.model || '');
+      S.think = j.ms;
+    }else{
+      document.getElementById('subMeta').textContent = '（她没说话）';
+    }
+  }catch(e){
+    document.getElementById('subMeta').textContent = '发不出去：' + e.message;
+  }
+}
+document.getElementById('chatSend').addEventListener('click', sendText);
+document.getElementById('chatInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); sendText(); }
+});
+
+async function loadCams(){
+  const sel = document.getElementById('cams');
+  try{
+    const j = await (await fetch('/api/cams', {cache:'no-store'})).json();
+    const cur = j.current || '';
+    sel.innerHTML = (j.cams && j.cams.length)
+      ? j.cams.map(n => '<option' + (n === cur ? ' selected' : '') + '>' + n + '</option>').join('')
+      : '<option>没找到设备</option>';
+  }catch(e){
+    sel.innerHTML = '<option>枚举失败</option>';
+  }
+}
+document.getElementById('cams').addEventListener('change', async e => {
+  const name = e.target.value;
+  document.getElementById('subMeta').textContent = '换摄像头…';
+  try{
+    await fetch('/api/cam', {method:'POST', headers:{'Content-Type':'application/json'},
+                             body: JSON.stringify({name: name})});
+    document.getElementById('subMeta').textContent = '已经切到「' + name + '」，2 秒后画面会重连。';
+    setTimeout(() => {
+      const ci = document.getElementById('camImg');
+      if(ci) ci.src = '/cam.mjpg?t=' + Date.now();
+    }, 2500);
+  }catch(err){}
+});
+loadCams();
+
+/* 背景选择：?bg=1|2|3 换图，?bg=canvas 用程序化那间房 */
+(function pickBg(){
+  const q = (location.search.match(/[?&]bg=([^&]+)/) || [])[1] || '2';
+  const el = document.getElementById('roomBg');
+  const cv = document.getElementById('roomCv');
+  if(q === 'canvas'){
+    if(el) el.style.display = 'none';
+    if(cv) cv.style.display = 'block';
+    return;
+  }
+  const n = ['1', '2', '3'].includes(q) ? q : '1';
+  if(el) el.style.backgroundImage = 'url(bg/room' + n + '.png)';
+  if(cv) cv.style.display = 'none';
+})();
+
+setInterval(poll, 1200); poll();
+setInterval(tick, 500); tick();
+setInterval(renderClock, 1000); renderClock();
+})();
+</script>
+<script src="room.js"></script>
+</body>
 </html>

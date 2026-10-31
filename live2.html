@@ -1,0 +1,2036 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>小肥鱼 · 通话中</title>
+<style>
+  :root{
+    --bg:#04080f;
+    --panel:rgba(9,24,42,.78);
+    --line:rgba(38,92,132,.6);
+    --cyan:#4dd0e1;
+    --blue:#2f7fd4;
+    --deep:#0a1830;
+    --txt:#8fc6dd;
+    --dim:#4a6c84;
+    --pink:#f6dbd7;
+    --warn:#ff8a65;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);overflow:hidden;font-family:"Consolas","Cascadia Mono","Microsoft YaHei",monospace;color:var(--txt)}
+  body::before{
+    content:"";position:fixed;inset:0;
+    background:
+      radial-gradient(1200px 700px at 22% 40%, rgba(28,86,150,.28), transparent 65%),
+      radial-gradient(900px 600px at 82% 78%, rgba(14,60,110,.22), transparent 70%),
+      linear-gradient(180deg,#04080f,#060d1a 60%,#03060c);
+    pointer-events:none;
+  }
+  /* 细网格 */
+  body::after{
+    content:"";position:fixed;inset:0;pointer-events:none;opacity:.16;
+    background-image:linear-gradient(rgba(77,208,225,.10) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(77,208,225,.10) 1px,transparent 1px);
+    background-size:44px 44px;
+    mask-image:radial-gradient(ellipse at 50% 45%,#000 40%,transparent 88%);
+  }
+
+  .stage{position:relative;z-index:2;height:100%;display:grid;
+    grid-template-columns:minmax(0,1fr) 470px;
+    grid-template-rows:1fr 96px;gap:0 26px;padding:22px 28px 0}
+
+  /* ============ 立绘区 ============ */
+  .avatar-cell{position:relative;display:flex;align-items:center;justify-content:center;
+    min-height:0;padding:20px 0 44px}
+  .platform{
+    position:absolute;bottom:5%;left:50%;transform:translateX(-50%);
+    width:min(620px,76%);height:64px;
+    background:radial-gradient(ellipse at 50% 50%,rgba(77,208,225,.22),transparent 70%);
+    filter:blur(4px);
+  }
+  .chibi-wrap{
+    position:relative;height:100%;max-height:100%;aspect-ratio:543/598;
+    transform-origin:50% 100%;
+    animation:breathe 4.2s ease-in-out infinite;
+    will-change:transform;
+  }
+  @keyframes breathe{
+    0%,100%{transform:translateY(0) scaleY(1)}
+    50%    {transform:translateY(-6px) scaleY(1.012)}
+  }
+  .sway{
+    position:absolute;inset:0;transform-origin:50% 96%;
+    animation:sway 6.4s ease-in-out infinite;
+  }
+  @keyframes sway{
+    0%,100%{transform:rotate(-.55deg)}
+    50%    {transform:rotate(.55deg)}
+  }
+  .head-tilt{
+    position:absolute;inset:0;transform-origin:46.1% 63%;
+    animation:headtilt 4.9s ease-in-out infinite;
+  }
+  @keyframes headtilt{
+    0%,100%{transform:rotate(.9deg) translateX(-2px)}
+    50%    {transform:rotate(-.9deg) translateX(2px)}
+  }
+  /* 阴影放在 wrap 上（对三层合成结果生效）；每层单独加会沿蒙版边缘发亮 */
+  .chibi-wrap{filter:drop-shadow(0 18px 34px rgba(4,20,40,.85)) drop-shadow(0 0 42px rgba(47,127,212,.28))}
+  .chibi{position:absolute;inset:0;width:100%;height:100%;
+    object-fit:contain;
+    image-rendering:auto;-webkit-user-drag:none;user-select:none}
+  /* ===== 2.5D 分层（同一张图叠三次，用互补蒙版切出 身/尾/头）=====
+     mask 是 RGBA，alpha 才是遮罩值；三层之和恒为 1，所以接缝不出重影 */
+  .layer{position:absolute;inset:0;will-change:transform}
+  .layer img{
+    mask-repeat:no-repeat;-webkit-mask-repeat:no-repeat;
+    mask-size:100% 100%;-webkit-mask-size:100% 100%;
+  }
+  .back-l{z-index:0}
+  .tail-l{z-index:1;transform-origin:77% 79%}
+  .tail-l img{mask-image:url(chibi/parts/mask_tail.png);-webkit-mask-image:url(chibi/parts/mask_tail.png)}
+  .body-l{z-index:2}
+  .body-l img{mask-image:url(chibi/parts/mask_body.png);-webkit-mask-image:url(chibi/parts/mask_body.png)}
+  .head-l{z-index:3;transform-origin:50% 52%}
+  .head-l img{mask-image:url(chibi/parts/mask_head.png);-webkit-mask-image:url(chibi/parts/mask_head.png)}
+
+  /* 叠层容器：JS 会把它精确对齐到图片实际渲染区，避免 letterbox 偏移 */
+  .fx{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
+
+  /* 眼睛（眨眼遮罩）—— 坐标由 chibi.png 5% 网格实测标定 */
+  .eye{
+    position:absolute;width:10.8%;height:11.2%;
+    left:34.0%;top:40.1%;
+    transform:translate(-50%,-50%) scaleY(0);
+    transform-origin:50% 50%;
+    background:radial-gradient(ellipse at 50% 54%, #feece9 0 48%, #fde1da 68%, rgba(252,216,210,.55) 84%, rgba(252,216,210,0) 100%);
+    border-radius:50%;
+    opacity:0;
+    transition:opacity .05s linear;
+    pointer-events:none;
+  }
+  .eye.r{left:52.2%;top:40.0%}
+  .eye::after{ /* 闭合的睫毛弧 */
+    content:"";position:absolute;left:7%;right:7%;top:48%;height:13%;
+    border-radius:50%/70%;
+    background:linear-gradient(90deg,rgba(74,58,78,0) 0%,#453445 16%,#453445 84%,rgba(74,58,78,0) 100%);
+    opacity:.92;
+  }
+  .eye.closed{opacity:1;transform:translate(-50%,-50%) scaleY(1)}
+
+  /* 嘴：参数化口型（open × wide 两个自由度），叠在「已抹掉嘴」的 chibi_closed 上
+     —— 张嘴图不再参与显示，所以不存在双嘴，也不会像贴片那样留一圈边 */
+  .mouth{position:absolute;inset:0;pointer-events:none;--open:0;--wide:1;--roll:0}
+  .cavity{
+    position:absolute;left:42.9%;top:45.6%;
+    width:calc(3.4% * var(--wide));
+    height:calc(0.2% + 1.85% * var(--open));
+    transform:translate(-50%,-50%) rotate(calc(var(--roll) * 1deg));
+    background:
+      radial-gradient(ellipse at 50% 16%, rgba(58,12,16,.96) 0%, rgba(104,32,38,.94) 40%, #8e3a42 74%, #a8525a 100%);
+    border-radius:48% 48% 50% 50% / 42% 42% 58% 58%;
+    box-shadow:
+      inset 0 1.5px 2px rgba(44,6,10,.70),
+      inset 0 -2px 3px rgba(216,124,128,.26),
+      0 0 0 1px rgba(174,102,110,.26),
+      0 1px 1.5px rgba(120,60,68,.22);
+    opacity:0;transition:opacity .05s linear;
+  }
+  .teeth{ /* 上排小牙，open 小的时候露一点 */
+    position:absolute;left:50%;top:4%;transform:translateX(-50%);
+    width:58%;height:14%;border-radius:0 0 46% 46%/0 0 100% 100%;
+    background:linear-gradient(#fffdfa,#f0e2e0);
+    opacity:calc((1 - var(--open)) * .85);
+  }
+  .tongue{
+    position:absolute;left:50%;bottom:6%;transform:translateX(-50%);
+    width:52%;height:26%;border-radius:50%;
+    background:radial-gradient(ellipse at 50% 38%,#dd868f,#b5565f);
+    opacity:calc((var(--open) - .40) * 1.5);
+  }
+  .lip{ /* 上唇投影，把口型压进脸里 */
+    position:absolute;left:50%;top:-9%;transform:translateX(-50%);
+    width:126%;height:34%;border-radius:50%;
+    background:linear-gradient(rgba(122,54,62,.30),rgba(122,54,62,0));
+  }
+  .mouth.open .cavity{opacity:1}
+
+  /* ===== 真 Live2D（大肥鱼 DeepSeek-chan）===== */
+  /* VTS 模式：不要整块藏掉 .l2d-wrap —— #vtsHint 是它的子元素，藏了就一起没了 */
+  body.render-vts #l2dCanvas{display:none}
+  body.render-vts #vtsHint{display:flex}
+  body.render-vts.no-hint #vtsHint{display:none}
+  #vtsHint{display:none;position:absolute;inset:0;align-items:center;justify-content:center;
+    color:#5d7590;font-size:13px;letter-spacing:.16em;flex-direction:column;gap:10px}
+  #vtsHint b{color:#8fd8f0;font-weight:600;font-size:15px;letter-spacing:.1em}
+  .l2d-wrap{
+    position:relative;flex:1;min-height:0;height:100%;
+    display:flex;align-items:flex-end;justify-content:center;
+    /* 辉光/投影加在 canvas 上，模型透明背景能直接吃到 */
+    filter:drop-shadow(0 18px 34px rgba(4,20,40,.85)) drop-shadow(0 0 42px rgba(47,127,212,.28));
+  }
+  #l2dCanvas{display:block;max-width:100%;max-height:100%}
+  /* 模型自带的黑图标贴在鼻梁上，pixi 内部缓存挡住改不动图层，用肤色补丁盖住 */
+  .l2d-loading{
+    position:absolute;left:50%;bottom:12%;transform:translateX(-50%);
+    font:12px/1 ui-monospace,Consolas,monospace;letter-spacing:.16em;
+    color:rgba(160,210,235,.75);transition:opacity .4s;
+  }
+  .l2d-loading.done{opacity:0;pointer-events:none}
+
+  /* 通话状态标签 */
+  .call-tag{
+    position:absolute;top:14px;left:16px;z-index:7;
+    display:flex;align-items:center;gap:9px;
+    padding:7px 18px;border:1px solid var(--line);border-radius:999px;
+    background:rgba(6,18,32,.7);font-size:12.5px;letter-spacing:.12em;
+    color:var(--cyan);backdrop-filter:blur(6px);white-space:nowrap;
+  }
+  .pulse{width:8px;height:8px;border-radius:50%;background:#43e08a;
+    box-shadow:0 0 10px #43e08a;animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+
+  /* ============ HUD 区 ============ */
+  .hud{display:flex;flex-direction:column;gap:12px;min-height:0;overflow:hidden;padding-bottom:8px}
+  .hud > .card:nth-last-child(1){margin-top:auto}
+  .card{
+    border:1px solid var(--line);border-radius:4px;background:var(--panel);
+    padding:11px 13px;position:relative;backdrop-filter:blur(7px);
+  }
+  .card::before{ /* 左上角装饰角 */
+    content:"";position:absolute;left:-1px;top:-1px;width:13px;height:13px;
+    border-left:2px solid var(--cyan);border-top:2px solid var(--cyan);
+  }
+  .card h3{
+    font-size:10.5px;font-weight:600;letter-spacing:.2em;color:var(--dim);
+    margin-bottom:9px;display:flex;justify-content:space-between;align-items:center;
+  }
+  .card h3 span{color:var(--cyan);font-weight:400;letter-spacing:.08em}
+
+  .row{display:flex;justify-content:space-between;align-items:baseline;
+    font-size:12px;padding:3px 0;letter-spacing:.04em}
+  .row b{color:#cfeaf5;font-weight:500;font-variant-numeric:tabular-nums}
+  .row em{color:var(--dim);font-style:normal;font-size:11px}
+
+  .bar{height:6px;border-radius:3px;background:rgba(77,208,225,.10);
+    overflow:hidden;margin-top:6px;box-shadow:inset 0 0 6px rgba(0,0,0,.5)}
+  .bar>i{display:block;height:100%;background:linear-gradient(90deg,#2f7fd4,#4dd0e1);
+    width:0%;transition:width .25s ease;border-radius:3px;
+    box-shadow:0 0 8px rgba(77,208,225,.65)}
+
+  /* 音量条阵列 */
+  .vol{display:flex;align-items:flex-end;gap:3px;height:46px;margin-top:4px}
+  .vol i{flex:1;background:linear-gradient(180deg,#4dd0e1,#1d5f8c);
+    border-radius:1px;height:3px;transition:height .08s linear;opacity:.85}
+  .vol i.hot{background:linear-gradient(180deg,#ffd54f,#ff8a65)}
+
+  /* 摄像头小窗 */
+  .cam{
+    position:relative;border:1px solid var(--line);border-radius:4px;overflow:hidden;
+    aspect-ratio:4/3;background:#02060c;
+  }
+  .cam img{width:100%;height:100%;object-fit:cover;display:block;
+    filter:brightness(.80) contrast(1.05) saturate(.96)}
+  .cam::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 45%, rgba(0,0,0,0) 42%, rgba(0,8,20,.42) 100%);
+    mix-blend-mode:multiply;}
+  .cam .scan{
+    position:absolute;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,.20) 0 1px,transparent 1px 3px);
+    mix-blend-mode:multiply;
+  }
+  .cam .tag{
+    position:absolute;left:7px;top:6px;font-size:9.5px;letter-spacing:.16em;
+    color:var(--cyan);background:rgba(2,10,18,.62);padding:2px 6px;border-radius:2px;
+  }
+  .cam .tag.red{right:7px;left:auto;color:#ff6b6b}
+  .cam .reticle{
+    position:absolute;left:50%;top:44%;width:54px;height:54px;
+    transform:translate(-50%,-50%);border:1px solid rgba(77,208,225,.32);border-radius:50%;
+  }
+  .cam .reticle::before,.cam .reticle::after{
+    content:"";position:absolute;background:rgba(77,208,225,.5);
+  }
+  .cam .reticle::before{left:50%;top:-7px;width:1px;height:7px}
+  .cam .reticle::after{top:50%;left:-7px;height:1px;width:7px}
+
+  /* ============ 字幕 ============ */
+  .subtitle-cell{grid-column:1/-1;display:flex;align-items:center;padding:0 4px 18px}
+  .chatbar{position:absolute;right:22px;bottom:74px;z-index:6;display:flex;gap:8px;
+    width:min(520px,42vw);opacity:.94}
+  .chatbar input{flex:1;min-width:0;background:rgba(10,22,36,.92);
+    border:1px solid rgba(90,170,220,.42);border-radius:7px;padding:9px 12px;
+    color:#dff1fb;font:14px/1.4 inherit;outline:none}
+  .chatbar input:focus{border-color:rgba(110,210,255,.85);
+    box-shadow:0 0 0 2px rgba(110,210,255,.14)}
+  .chatbar button{background:rgba(28,92,132,.95);border:1px solid rgba(90,190,240,.55);
+    color:#dff1fb;border-radius:7px;padding:0 16px;font:14px/1 inherit;cursor:pointer}
+  .chatbar button:hover{background:rgba(40,124,170,.95)}
+  .sub{
+    width:100%;border:1px solid var(--line);border-radius:4px;
+    background:linear-gradient(90deg,rgba(9,24,42,.92),rgba(9,24,42,.55));
+    padding:14px 20px;display:flex;align-items:center;gap:16px;min-height:64px;
+  }
+  .sub .who{
+    font-size:11px;letter-spacing:.2em;color:var(--cyan);white-space:nowrap;
+    padding:5px 11px;border:1px solid rgba(77,208,225,.35);border-radius:3px;
+  }
+  .sub .text{font-size:18px;color:#e8f4fa;letter-spacing:.03em;line-height:1.5;
+    font-family:"Microsoft YaHei","PingFang SC",sans-serif}
+  .sub .text .cur{display:inline-block;width:9px;height:17px;background:var(--cyan);
+    vertical-align:-2px;margin-left:3px;animation:blink 1.1s steps(2) infinite}
+  @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+
+  .stamp{position:absolute;right:28px;bottom:14px;font-size:10px;color:rgba(74,108,132,.75);
+    letter-spacing:.12em;z-index:3}
+  .err{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+    border:1px solid #ff8a65;background:rgba(30,10,6,.94);color:#ffb4a0;
+    padding:16px 22px;border-radius:5px;font-size:13px;line-height:1.7;display:none;z-index:9}
+  .l2d-wrap{position:absolute;left:47%;bottom:104px;transform:translateX(-50%);
+    height:770px;width:920px;display:flex;align-items:flex-end;justify-content:center;
+    filter:drop-shadow(0 26px 60px rgba(0,0,0,.55))}
+  #l2dCanvas{display:block;max-width:100%;max-height:100%}
+  .l2d-loading{position:absolute;left:50%;bottom:40%;transform:translateX(-50%);
+    font-family:var(--mono);font-size:11px;letter-spacing:.18em;color:var(--ink-2);
+    padding:8px 14px;border:1px solid var(--line);background:rgba(11,15,21,.7)}
+  #vtsHint{display:none}
+  .calltag{position:absolute;right:44px;top:70px;display:flex;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:var(--ink-2)}
+  .calltag .pulse{width:7px;height:7px;border-radius:50%;background:#7FD0A0;
+    box-shadow:0 0 10px rgba(127,208,160,.9);animation:callPulse 2.1s ease-in-out infinite}
+  @keyframes callPulse{0%,100%{opacity:.35}50%{opacity:1}}
+  .stamp{position:absolute;right:44px;bottom:6px;z-index:6;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--ink-3);opacity:.7}
+  .err{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:98;display:none;
+    font-family:var(--mono);font-size:11px;color:#F0B7A6;background:rgba(60,20,14,.92);
+    border:1px solid rgba(196,85,62,.5);padding:8px 14px;max-width:70vw}
+
+</style>
+<style>
+  :root{
+    --ink:      #C7C8CB;   /* 主文字 */
+    --ink-2:    #8A8F96;   /* 次文字 / 单位 */
+    --ink-3:    #5B626B;   /* 极弱 */
+    --line:     #3C4351;   /* 分区线 */
+    --scrim:    #262D35;   /* 冷雾 */
+    --warm:     #D9C49A;   /* 暖沙 */
+    --warm-hi:  #E4D8BE;
+    --red:      #C4553E;   /* 警示 */
+    --mono:     "JetBrains Mono", Consolas, "Courier New", monospace;
+    --sans:     "Microsoft YaHei", "PingFang SC", sans-serif;
+    --serif:    "Source Han Serif SC", "Songti SC", SimSun, serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#10141A;overflow:hidden}
+  body{font-family:var(--sans);color:var(--ink);
+       -webkit-font-smoothing:antialiased}
+
+  /* ── 舞台：固定 1920×1080，按窗口等比缩放 ───────────────── */
+  #stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;
+         transform-origin:center center;background:#141920}
+
+  /* ── 第一层：暖色房间（虚焦） ──────────────────────────── */
+  .room{position:absolute;inset:0;overflow:hidden;background:
+    linear-gradient(180deg,#4A3A28 0%,#382C1E 55%,#231B13 100%)}
+  /* 背景：ComfyUI 出的书房（?bg=1|2|3 切换对比）；room.js 那张程序化图留作兜底 */
+  #roomBg{position:absolute;inset:0;background-size:cover;background-position:center;
+    background-image:url(bg/room1.png);
+    filter:blur(2.2px) saturate(.92) brightness(.80);
+    transform:scale(1.03);transform-origin:center}
+  /* 程序化房间：默认藏起来，?bg=canvas 时用 */
+  #roomCv{position:absolute;inset:0;width:100%;height:100%;display:none;
+    filter:blur(4.5px) saturate(.94) brightness(.94);
+    transform:scale(1.04);transform-origin:center}
+  /* 书架：一排竖条，模糊掉 */
+  .shelf{position:absolute;left:-40px;right:-40px;top:120px;height:760px;
+    filter:blur(30px);opacity:.30;
+    background:
+      repeating-linear-gradient(90deg,
+        #6B5238 0 54px, #4A3A28 54px 62px,
+        #7A5B33 62px 118px, #4A3A28 118px 126px,
+        #5E4830 126px 186px, #4A3A28 186px 194px);
+  }
+  /* 右上窗光：一大团暖光 */
+  .window{position:absolute;right:-160px;top:-220px;width:1200px;height:1000px;
+    filter:blur(96px);opacity:.55;
+    background:radial-gradient(ellipse at 62% 34%,
+      #F3E4C4 0%, #E0C99E 26%, rgba(190,160,110,.55) 52%, rgba(120,96,64,0) 78%)}
+  /* 左下地板反光 */
+  .floor{position:absolute;left:-100px;bottom:-160px;width:1400px;height:620px;
+    filter:blur(74px);opacity:.42;
+    background:radial-gradient(ellipse at 40% 60%,
+      rgba(196,150,96,.5) 0%, rgba(120,88,54,.28) 46%, rgba(0,0,0,0) 76%)}
+  /* 前景一根书架边缘（压暗，制造景深） */
+  .fg{position:absolute;left:-60px;top:0;width:300px;height:1080px;
+    filter:blur(16px);
+    background:linear-gradient(90deg,rgba(8,7,6,.94) 0%,rgba(8,7,6,.72) 52%,rgba(8,7,6,0) 100%)}
+
+  /* ── 第二层：冷雾（把暖房间压成"背景"） ────────────────── */
+  .scrim{position:absolute;inset:0;
+    background:
+      radial-gradient(ellipse at 44% 42%, rgba(38,45,53,.12) 0%, rgba(24,29,36,.40) 62%, rgba(16,20,26,.66) 100%),
+      linear-gradient(180deg, rgba(20,25,32,.50) 0%, rgba(20,25,32,.20) 40%, rgba(16,20,26,.72) 100%)}
+
+  /* ── 她 ─────────────────────────────────────────────── */
+  .her{position:absolute;left:47%;bottom:104px;transform:translateX(-50%);
+    height:770px;
+    filter:brightness(.97) saturate(.94) sepia(.07)
+           drop-shadow(0 26px 60px rgba(0,0,0,.55))}
+  /* 她脚下的地面暖光 */
+  .her-glow{position:absolute;left:47%;bottom:86px;transform:translateX(-50%);
+    width:760px;height:200px;filter:blur(52px);opacity:.5;
+    background:radial-gradient(ellipse at 50% 50%, #E6CFA4 0%, rgba(200,166,110,.4) 46%, rgba(0,0,0,0) 76%)}
+
+  /* ── HUD 通用 ───────────────────────────────────────── */
+  .hud{position:absolute;inset:0;pointer-events:none}
+  .mono{font-family:var(--mono);font-size:12px;letter-spacing:.09em;
+        text-transform:uppercase;color:var(--ink-2)}
+  .num{font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--ink)}
+
+  /* 顶部条 */
+  .top{position:absolute;left:0;right:0;top:0;height:96px;
+       border-bottom:1px solid var(--line);
+       background:linear-gradient(180deg,rgba(11,15,21,.92) 0%,rgba(11,15,21,.62) 72%,rgba(11,15,21,0) 100%)}
+  .top .cell{position:absolute;top:26px;width:270px}
+  .top .cell.l1{left:48px}
+  .top .cell.l2{left:354px}
+  .top .cell.r1{right:300px;text-align:right}
+  .top .cell.r2{right:48px;text-align:right}
+  .top .cell b{display:block;font-family:var(--mono);font-size:15px;
+       letter-spacing:.05em;color:var(--ink);font-weight:400;margin-top:3px}
+  .top .date{position:absolute;left:50%;top:36px;transform:translateX(-50%);
+       font-family:var(--mono);font-size:12px;letter-spacing:.22em;color:var(--ink-3)}
+
+  /* 左右竖列 */
+  .col{position:absolute;top:120px;bottom:104px;width:252px}
+  .col.left{left:0;padding-left:48px;width:300px;border-right:1px solid var(--line);
+       background:linear-gradient(90deg,rgba(11,15,21,.90) 0%,rgba(11,15,21,.70) 58%,rgba(11,15,21,0) 100%)}
+  .col.right{right:0;padding-right:48px;width:300px;top:392px;text-align:right;
+       background:linear-gradient(270deg,rgba(11,15,21,.90) 0%,rgba(11,15,21,.70) 58%,rgba(11,15,21,0) 100%)}
+  .row{position:relative;height:44px;padding-top:9px}
+  .row em{display:block;font-style:normal;font-family:var(--mono);font-size:10.5px;
+       letter-spacing:.13em;text-transform:uppercase;color:var(--ink-2)}
+  .row b{display:block;font-family:var(--mono);font-size:15px;font-weight:400;
+       letter-spacing:.04em;color:var(--ink);margin-top:2px}
+  .row b span{font-size:11px;color:var(--ink-2);letter-spacing:.06em}
+  .row.warm b{color:var(--warm-hi)}
+  .rule{height:1px;background:var(--line);margin:14px 0 18px}
+
+  /* 识海球 */
+  /* ── 记忆片段列表（左列下方） ────────────────────────── */
+  .frag{position:absolute;left:0;top:556px;width:300px;padding-bottom:14px;
+    background:linear-gradient(90deg,rgba(11,15,21,.90) 0%,rgba(11,15,21,.55) 64%,rgba(11,15,21,0) 100%)}
+  .frag h4{margin:0 0 9px;font-family:var(--mono);font-size:10px;font-weight:400;
+    letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3)}
+  .frag ul{margin:0;padding:0 0 0 11px;list-style:none}
+  .frag li{position:relative;padding-left:13px;margin-bottom:6px;
+    font-family:var(--sans);font-size:11px;line-height:1.62;color:var(--ink-2);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    opacity:0;animation:fragIn .9s forwards}
+  .frag li::before{content:"";position:absolute;left:0;top:.72em;width:6px;height:1px;
+    background:var(--warm);opacity:.55}
+  @keyframes fragIn{to{opacity:.92}}
+
+  .mind{position:absolute;right:48px;top:108px;width:250px;height:250px;
+    border-radius:50%;
+    background:radial-gradient(circle,rgba(8,12,18,.92) 0%,rgba(8,12,18,.72) 62%,rgba(8,12,18,.28) 88%,rgba(8,12,18,0) 100%)}
+  #mindCv{width:250px;height:250px;display:block}
+  .mind .ring{position:absolute;inset:0;border-radius:50%;
+    border:1px solid var(--line)}
+  .mind .cap{position:absolute;left:0;right:0;bottom:5px;text-align:center;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;color:var(--ink-2)}
+  .mind .cap b{color:var(--ink-2);font-weight:400}
+
+  /* 字幕（双语） */
+  .sub{position:absolute;left:0;right:0;bottom:214px;text-align:center}
+  .sub .cn{font-family:var(--serif);font-size:34px;font-weight:500;
+    letter-spacing:.04em;color:#F2EFE8;
+    text-shadow:0 2px 26px rgba(0,0,0,.92),0 0 60px rgba(0,0,0,.6)}
+  .sub .en{margin-top:9px;font-family:var(--mono);font-size:12px;
+    letter-spacing:.16em;color:#9AA1A9;text-transform:uppercase;
+    text-shadow:0 2px 14px rgba(0,0,0,.9)}
+
+  /* 底部时间轴 */
+  .foot{position:absolute;left:0;right:0;bottom:0;height:172px;
+        border-top:1px solid var(--line);
+        background:linear-gradient(0deg,rgba(11,15,21,.96) 0%,rgba(11,15,21,.80) 58%,rgba(11,15,21,.30) 88%,rgba(11,15,21,0) 100%)}
+  .foot .clock{position:absolute;left:44px;top:30px;display:flex;align-items:center}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--red);
+       margin-right:16px;box-shadow:0 0 12px rgba(196,85,62,.9)}
+  .clock b{font-family:var(--mono);font-size:30px;font-weight:400;
+       letter-spacing:.02em;color:#E7E5E0}
+  .clock b i{font-style:normal;font-size:15px;color:var(--ink-2);margin-left:3px;letter-spacing:.1em}
+  .clock .lbl{margin-left:20px;font-family:var(--mono);font-size:10.5px;
+       letter-spacing:.16em;color:var(--ink-3);text-transform:uppercase}
+  /* 进度格 */
+  .bars{position:absolute;right:44px;top:34px;display:flex;align-items:center;gap:4px}
+  .bars i{display:block;width:13px;height:15px;background:#2A313A}
+  .bars i.on{background:var(--warm)}
+  .bars .t{margin-left:14px;font-family:var(--mono);font-size:10.5px;
+       letter-spacing:.14em;color:var(--ink-3);text-transform:uppercase}
+  .bars .t b{color:var(--ink);font-weight:400}
+
+
+  /* ── 底部控制条：麦克风 / 对话框 / 摄像头 ─────────────── */
+  .foot .clock{top:20px}
+  .bars{top:24px}
+  .ctrl{position:absolute;left:50%;bottom:30px;transform:translateX(-50%);
+        display:flex;align-items:center;gap:18px;width:960px}
+  .mic{display:flex;align-items:center;gap:10px;cursor:pointer;
+       font-family:var(--mono);font-size:12px;letter-spacing:.16em;
+       color:var(--ink-2);user-select:none;padding:6px 14px 6px 2px;
+       border-right:1px solid var(--line)}
+  .mic i{width:10px;height:10px;border-radius:50%;background:#3A414B;
+         transition:background .18s,box-shadow .18s}
+  .mic.on i{background:var(--warm);box-shadow:0 0 12px rgba(217,196,154,.85)}
+  .mic.on{color:var(--warm-hi)}
+  .talk{flex:1;display:flex;align-items:center;gap:10px;
+        border-bottom:1px solid var(--line);padding-bottom:5px}
+  .talk:focus-within{border-bottom-color:var(--warm)}
+  .talk span{font-family:var(--mono);font-size:17px;color:var(--ink-3)}
+  .talk input{flex:1;background:none;border:0;outline:0;color:var(--ink);
+        font-family:var(--sans);font-size:15px;letter-spacing:.02em}
+  .talk input::placeholder{color:var(--ink-3)}
+  .talk button{background:none;border:0;outline:0;cursor:pointer;
+        font-family:var(--mono);font-size:11.5px;letter-spacing:.18em;
+        color:var(--ink-2);padding:2px 6px}
+  .talk button:hover{color:var(--warm-hi)}
+  .talk button:hover{color:var(--warm-hi)}
+  .camsel{display:flex;align-items:center;gap:8px;
+        border-left:1px solid var(--line);padding-left:14px}
+  .camsel em{font-style:normal;font-family:var(--mono);font-size:11px;
+        letter-spacing:.14em;color:var(--ink-3);text-transform:uppercase}
+  .camsel select{appearance:none;background:none;border:0;outline:0;cursor:pointer;
+        color:var(--ink);font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;
+        max-width:230px;padding-right:14px}
+  .camsel option{background:#141920;color:var(--ink)}
+
+  /* ── 摄像头小窗：验证「摄像头选择」到底切没切 ─────────── */
+  .camwin{position:absolute;right:48px;bottom:200px;width:300px;aspect-ratio:16/9;
+    border:1px solid var(--line);overflow:hidden;
+    background:radial-gradient(circle at 50% 45%,#1A2028,#0C1015);
+    box-shadow:0 12px 34px rgba(0,0,0,.45)}
+  .camwin img{width:100%;height:100%;object-fit:cover;display:block;
+    filter:brightness(.82) contrast(1.06) saturate(.9)}
+  .camwin::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 50%,rgba(0,0,0,0) 46%,rgba(0,8,18,.55) 100%)}
+  .camwin span{position:absolute;left:9px;top:7px;z-index:2;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;color:#C9D2DB;
+    text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  .camwin .dot{position:absolute;right:9px;top:9px;z-index:2;width:6px;height:6px;
+    border-radius:50%;background:var(--red);box-shadow:0 0 7px var(--red);
+    animation:beat 1.6s infinite}
+  @keyframes beat{0%,100%{opacity:1}50%{opacity:.28}}
+
+  /* demo 标记：这一版去掉（压住 ACTIVE MEMORY），需要时看页面标题 */
+  /* ── 覆盖 live 留下的显示属性（它那套是 flex 卡片，这一版是绝对定位版式） ── */
+  .hud{display:block;padding:0;gap:0;overflow:visible}
+  .row{display:block;height:auto;padding-top:0;gap:0}
+  .col.left .row{height:44px;padding-top:9px}
+  .col.right .row{height:auto;padding-top:7px;margin-bottom:3px}
+  .sub{display:block;text-align:center;padding:0;background:none;border:0;box-shadow:none;backdrop-filter:none}
+  .sub .cn{min-height:1.2em}
+  .sub .en{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #sink{display:none !important}
+  .frag li{white-space:nowrap}
+
+</style>
+<style>
+.gate{position:fixed;inset:0;z-index:99;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(circle at 50% 45%,rgba(10,26,44,.86),rgba(3,8,16,.97));backdrop-filter:blur(6px);
+  transition:opacity .45s ease}
+.gate.gone{opacity:0;pointer-events:none}
+.gate-in{text-align:center;animation:gateIn .6s ease}
+@keyframes gateIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.gate-dot{width:14px;height:14px;border-radius:50%;background:#4dd0e1;margin:0 auto 22px;
+  box-shadow:0 0 0 0 rgba(77,208,225,.6);animation:ring 1.8s infinite}
+@keyframes ring{0%{box-shadow:0 0 0 0 rgba(77,208,225,.55)}70%{box-shadow:0 0 0 18px rgba(77,208,225,0)}
+  100%{box-shadow:0 0 0 0 rgba(77,208,225,0)}}
+.gate h2{font-size:26px;letter-spacing:.16em;color:#dff3fb;font-weight:600;margin-bottom:10px}
+.gate p{font-size:13px;color:#7fa8bd;letter-spacing:.05em;margin-bottom:26px}
+.gate button{font:inherit;font-size:15px;letter-spacing:.34em;padding:13px 42px 13px 46px;cursor:pointer;
+  color:#04121c;background:linear-gradient(180deg,#8fe6f4,#37b7ce);border:0;border-radius:999px;
+  box-shadow:0 10px 30px rgba(55,183,206,.35);transition:transform .15s ease,filter .15s ease}
+.gate button:hover{transform:translateY(-1px);filter:brightness(1.08)}
+.gate button:disabled{opacity:.5;cursor:default;transform:none}
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <div class="room">
+    <div id="roomBg"></div>
+    <canvas id="roomCv"></canvas>
+    <div class="shelf"></div>
+    <div class="window"></div>
+    <div class="floor"></div>
+  </div>
+
+  <div class="her-glow"></div>
+  <div class="l2d-wrap" id="l2dWrap">
+    <canvas id="l2dCanvas"></canvas>
+    <div id="vtsHint"><b>已交给 VTube Studio 渲染</b><span>看旁边的 VTS 窗口</span></div>
+    <div class="l2d-loading" id="l2dLoading">加载模型…</div>
+  </div>
+
+  <div class="scrim"></div>
+  <div class="fg"></div>
+
+  <div class="hud">
+
+    <div class="top">
+      <div class="cell l1"><span class="mono">Memory usage</span><b id="tDocs">— docs</b></div>
+      <div class="cell l2"><span class="mono">Recall latency</span><b id="tThink">— ms</b></div>
+      <div class="cell r1"><span class="mono">Session</span><b id="tUp">—</b></div>
+      <div class="cell r2"><span class="mono">Voice</span><b>大肥鱼 · jiling</b></div>
+      <div class="date" id="tDate">2026 · 10 · 31</div>
+      <div class="calltag"><span class="pulse"></span><span id="callState">通话中 · 她正在看你</span></div>
+    </div>
+
+    <div class="col left" id="colL"></div>
+
+    <div class="frag" id="frag">
+      <h4>Memory fragments</h4>
+      <ul id="fragList"><li>正在读她的记忆…</li></ul>
+    </div>
+
+    <div class="col right">
+      <div class="row warm"><em>Emotion mapping</em><b id="rEmo">—</b></div>
+      <div class="row"><em>Smile / eyes</em><b><span id="rSmile">—</span> · <span id="rEye">—</span></b></div>
+      <div class="row"><em>Head pose</em><b><span id="rYaw">—</span> / <span id="rPitch">—</span></b></div>
+      <div class="row"><em>Behavior</em><b id="rBeh">—</b></div>
+      <div class="rule"></div>
+      <div class="row"><em>Heard</em><b id="rHeard">—</b></div>
+      <div class="row"><em>Recall</em><b id="rThink">—</b></div>
+
+    </div>
+
+    <div class="mind">
+      <canvas id="mindCv" width="500" height="500"></canvas>
+      <div class="ring"></div>
+      <div class="cap">记忆节点 <b id="mNode">—</b> · 连线 <b id="mEdge">—</b></div>
+    </div>
+
+    <div class="sub">
+      <div class="cn" id="subText"></div>
+      <div class="en" id="subMeta">Live2D · IndexTTS · AstrBot 大肥鱼</div>
+    </div>
+
+    <div class="foot">
+      <div class="clock">
+        <span class="dot"></span>
+        <b id="fClock">0<i>Y</i> 0<i>M</i> 2<i>D</i> 00:00:00</b>
+        <span class="lbl">Together since 2026·10·29</span>
+      </div>
+      <div class="ctrl">
+        <div class="mic on" id="mic"><i></i><span id="micTxt">MIC ON</span></div>
+        <div class="talk">
+          <span>&#8250;</span>
+          <input id="chatInput" placeholder="在这儿跟她说句话，回车发送" autocomplete="off">
+          <button id="chatSend">SEND</button>
+        </div>
+        <div class="camsel">
+          <em>Cam</em>
+          <select id="cams"><option>加载中…</option></select>
+        </div>
+      </div>
+      <div class="camwin">
+        <span>CAM 01</span><i class="dot"></i>
+        <img id="camImg" src="/cam.mjpg" alt="">
+      </div>
+      <div class="bars">
+        <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        <span class="t">Memory strength <b id="mRatio">—</b></span>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="sink" style="display:none">
+    <span id="linkState"></span><span id="memUsage"></span><span id="uptime"></span>
+    <span id="fps"></span><span id="bright"></span><span id="motion"></span><span id="rms"></span>
+    <span id="presenceState"></span><span id="voiceState"></span>
+    <span id="faceLook"></span><span id="faceEmo"></span>
+    <span id="heardText"></span><span id="thinkMs"></span>
+    <span id="rBright"></span><span id="rFps"></span>   <!-- 右列不显示，但脚本会写 -->
+    <i id="brightBar"></i><i id="motionBar"></i>
+    <div class="vol" id="vol"></div>
+  </div>
+
+  <div class="err" id="errBox"></div>
+  <div class="stamp">AI 生成内容 · 虚拟形象 · 模型 神宫凉子 / Live2D 霓虹猫_NeonNeko</div>
+</div>
+
+<div class="gate" id="gate">
+  <div class="gate-in">
+    <div class="gate-dot"></div>
+    <h2>小肥鱼 正在呼叫</h2>
+    <p id="gateMsg">接通后她就看得见你，也会出声</p>
+    <button id="gateBtn">接 通</button>
+  </div>
+</div>
+<script src="live2d/lib/live2dcubismcore.min.js"></script>
+<script src="live2d/lib/pixi.min.js"></script>
+<script src="live2d/lib/cubism4.min.js"></script>
+<script>
+/* 出错别静默：直接写到接通闸的提示行，方便排查（也能给用户看） */
+window.onerror = function(m, s, l){
+  const g = document.getElementById('gateMsg');
+  if(g){ g.textContent = 'JS 错误: ' + m + ' @L' + l; g.style.color = '#ff8a8a'; }
+  return false;
+};
+const $ = id => document.getElementById(id);
+/* ================= 真 Live2D：大肥鱼（DeepSeek-chan）=================
+   原图拆分版已废弃：桌面那份是完整 moc3 模型，自带物理、眨眼、表情和 idle 动作，
+   这里只负责把「她的声音振幅」和「鼠标/空闲注意力」喂成参数。
+   模型署名：原画/拆分 神宫凉子 · Live2D 建模 霓虹猫_NeonNeko */
+const l2dWrap = $('l2dWrap'), l2dCanvas = $('l2dCanvas'), l2dLoading = $('l2dLoading');
+const L2D_URL = 'live2d/model/大肥鱼/大肥鱼.model3.json';
+const FRAME_FULL = /frame=full/.test(location.search);   // 默认头肩取景，加参数看全身
+const BUST = 0.42;                                        // 取景占模型总高的比例
+let l2dModel = null, l2dApp = null, l2dCore = null, l2dReady = false;
+let mouthP = 0, emotionNow = '', emotionUntil = 0;
+const NO_MOUTH = /nomouth/.test(location.search);   // 排查：完全不动嘴参数
+const HIDE_PARTS = ['Part19', 'Part26', 'Part74'];
+/* 模型自带的一堆「道具/切换」开关（cdi3 里的 key1~13 / Movement1~3 / Clothes1~5）。
+   VTS 里它们是手动按的，网页里没人按，某些项回到默认值就会把贴纸/图标画在她脸上。
+   这里统一按到 0，只保留裙子长度和尾巴这两个想要的状态。 */
+const PROP_PARAMS = [
+  'key1','key2','key3','key4','key5','key6','key7','key8','key9','key10','key11','key12','key13',
+  'Movement1','Movement2','Movement3',
+  'Clothes1','Clothes3','Clothes4','Param34','Param2','Param140'
+];
+
+
+/* ── 鼻梁补丁自动对位 ────────────────────────────────────────────────
+   模型自带一个黑色小图标贴在两眼之间、鼻梁偏上，pixi-live2d-display 不会读我们
+   对 drawable/part opacity 的改动（逐个关掉 715 个 drawable 都没反应），所以只能盖。
+   这里在渲染完成后直接从画布上把它扫出来，换算成模型归一化坐标，再每次 fit 时重投。 */
+const nosePatch = document.querySelector('.nose-patch');
+let patchUV = null;      // {cx, cy, w, h} 相对模型画布的归一化值
+
+function calibratePatch(){
+  if(!l2dModel || !l2dApp) return;
+  const cv = l2dCanvas, W = cv.width, H = cv.height;
+  if(!W || !H) return;
+  const tmp = document.createElement('canvas');
+  tmp.width = W; tmp.height = H;
+  const ctx = tmp.getContext('2d');
+  ctx.drawImage(cv, 0, 0);
+  const img = ctx.getImageData(0, 0, W, H).data;
+  const lum = (x, y) => {
+    const i = (y * W + x) * 4;
+    if(img[i + 3] < 250) return -1;
+    return 0.299 * img[i] + 0.587 * img[i + 1] + 0.114 * img[i + 2];
+  };
+  // 只在脸中部找：一个近黑像素，四周 10px 都是亮肤色
+  let hit = null;
+  const x0 = Math.round(W * 0.34), x1 = Math.round(W * 0.66);
+  const y0 = Math.round(H * 0.22), y1 = Math.round(H * 0.55);
+  for(let y = y0; y < y1 && !hit; y += 2){
+    for(let x = x0; x < x1; x += 2){
+      const L = lum(x, y);
+      if(L < 0 || L > 55) continue;
+      const ring = [lum(x - 11, y), lum(x + 11, y), lum(x, y - 11), lum(x, y + 11)];
+      if(ring.every(v => v > 165)){ hit = {x, y}; break; }
+    }
+  }
+  if(!hit) return;
+  // 取连通块范围
+  let bx0 = hit.x, bx1 = hit.x, by0 = hit.y, by1 = hit.y;
+  const dark = (x, y) => { const L = lum(x, y); return L >= 0 && L < 70; };
+  const stack = [[hit.x, hit.y]], seen = new Set();
+  while(stack.length){
+    const [x, y] = stack.pop();
+    const k = x + ',' + y;
+    if(seen.has(k) || seen.size > 4000) continue;
+    if(!dark(x, y)) continue;
+    seen.add(k);
+    if(x < bx0) bx0 = x; if(x > bx1) bx1 = x;
+    if(y < by0) by0 = y; if(y > by1) by1 = y;
+    stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+  }
+  const ow = bx1 - bx0 + 1, oh = by1 - by0 + 1;
+  if(ow > W * 0.10 || oh > H * 0.12 || ow < 3 || oh < 3) return;   // 不像那个小图标就放弃
+  // 画布像素 → 模型归一化（画布就是模型容器铺满的 el）
+  const sc = l2dModel.scale.x;
+  patchUV = {
+    cx: ((bx0 + bx1) / 2 - l2dModel.x) / (l2dModel.internalModel.originalWidth * sc),
+    cy: ((by0 + by1) / 2 - l2dModel.y) / (l2dModel.internalModel.originalHeight * sc),
+    w: ow / (l2dModel.internalModel.originalWidth * sc),
+    h: oh / (l2dModel.internalModel.originalHeight * sc),
+  };
+  placePatch();
+}
+
+function placePatch(){
+  if(!patchUV || !l2dModel || !nosePatch) return;
+  const R = (l2dApp.renderer && l2dApp.renderer.resolution) || 1;   // autoDensity 下画布内部像素 = CSS px * R
+  const sc = l2dModel.scale.x;
+  const sx = (l2dModel.x + patchUV.cx * l2dModel.internalModel.originalWidth * sc) / R;
+  const sy = (l2dModel.y + patchUV.cy * l2dModel.internalModel.originalHeight * sc) / R;
+  const pw = patchUV.w * l2dModel.internalModel.originalWidth * sc / R;
+  const ph = patchUV.h * l2dModel.internalModel.originalHeight * sc / R;
+  // 画布内 px → 相对 .l2d-wrap 的 px（canvas 与 wrap 左上角对齐）
+  nosePatch.style.left = (l2dCanvas.offsetLeft + sx) + 'px';
+  nosePatch.style.top  = (l2dCanvas.offsetTop  + sy + ph * 0.20) + 'px';
+  nosePatch.style.width  = (pw * 1.85) + 'px';
+  nosePatch.style.height = (ph * 1.62) + 'px';
+  nosePatch.style.opacity = '1';
+}
+
+async function initLive2D(){
+  if(!(window.PIXI && PIXI.live2d)){ l2dLoading.textContent = 'Live2D 运行时没加载'; return; }
+  try{
+    const w = l2dWrap.clientWidth || 560, h = l2dWrap.clientHeight || 900;
+    l2dApp = new PIXI.Application({view:l2dCanvas, width:w, height:h, preserveDrawingBuffer:true,
+      backgroundAlpha:0, antialias:true, autoDensity:true,
+      resolution:Math.min(2, window.devicePixelRatio || 1)});
+    l2dModel = await PIXI.live2d.Live2DModel.from(L2D_URL, {autoInteract:false, idleMotionGroup:'Idle'});
+    l2dApp.stage.addChild(l2dModel);
+    l2dCore = l2dModel.internalModel.coreModel;
+    window.__l2d = {model:l2dModel, app:l2dApp};
+    l2dReady = true;
+    fitL2D();
+  setTimeout(calibratePatch, 700);
+    /* 关键：必须在 coreModel.update 之前改参数，否则改的是上一帧 */
+    l2dModel.internalModel.on('beforeModelUpdate', driveL2D);
+    l2dModel.expression('默认体型');
+    l2dLoading.classList.add('done');
+  }catch(e){
+    l2dLoading.textContent = '模型加载失败：' + (e && e.message ? e.message : e);
+    console.error('[l2d]', e);
+  }
+}
+
+function fitL2D(){
+  placePatch();
+  if(!l2dReady || !l2dApp) return;
+  const w = l2dWrap.clientWidth, h = l2dWrap.clientHeight;
+  if(!w || !h) return;
+  l2dApp.renderer.resize(w, h);
+  const im = l2dModel.internalModel;
+  const ow = im.originalWidth, oh = im.originalHeight;
+  const frac = FRAME_FULL ? 1 : BUST;
+  const s = h / (oh * frac);
+  l2dModel.scale.set(s);
+  l2dModel.x = (w - ow * s) / 2;
+  /* 头肩取景要「顶对齐」，全身取景才「底对齐」——对齐错了会只看到腿 */
+  l2dModel.y = FRAME_FULL ? (h - oh * s) : (-oh * s * 0.015);
+}
+window.addEventListener('resize', fitL2D);
+setInterval(fitL2D, 1500);
+
+/* 每帧把「状态」写进模型参数 */
+function driveL2D(){
+  if(!l2dCore) return;
+  const t = performance.now();
+  const set = (id, v) => { try{ l2dCore.setParameterValueById(id, v); }catch(e){} };
+  for(const pp of PROP_PARAMS){ try{ set(pp, PROP_V); }catch(e){} }
+  if(!NO_MOUTH){
+    set('ParamMouthOpenY', mouthP);
+    set('ParamMouthForm', 1 - mouthP * 0.6);      // 张嘴时嘴角收一点，像在说话
+  }
+  set('ParamAngleX', poseX * 26 + Math.sin(t / 2100) * 3);
+  set('ParamAngleY', -poseY * 18 + Math.sin(t / 1700) * 2);
+  set('ParamAngleZ', Math.sin(t / 2600) * 5 + poseX * 4);
+  set('ParamBodyAngleX', poseX * 8);
+  set('ParamBodyAngleY', -poseY * 5);
+  set('ParamEyeBallX', (lastFace && lastFace.present ? -lastFace.gaze_x * 0.9 : poseX * 0.7));
+  set('ParamEyeBallY', (lastFace && lastFace.present ? -lastFace.gaze_y * 0.6 : 0));
+  set('ParamEyeBallY', -poseY * 0.6);
+  set('ParamBreath', 0.5 + 0.5 * Math.sin(t / 2600));
+  /* 自带小道具（按键/加载图标）在 VTS 里默认是关的，网页里没人替她按掉，
+     会变成一个黑方块贴脸上。按 Part 名永久关掉。 */
+  for(const pid of HIDE_PARTS){ try{ l2dCore.setPartOpacityById(pid, 0); }catch(e){} }
+  if(emotionNow && t > emotionUntil){
+    emotionNow = '';
+    try{ l2dModel.expression('默认体型'); }catch(e){}
+  }
+}
+
+/* 文字 → 表情（用的是模型自带的 Exp3） */
+const EMO = [
+  [/爱你|喜欢你|抱抱|亲|贴贴/, '爱心眼'],
+  [/脸红|害羞|不好意思|想你了/, '脸红'],
+  [/生气|哼|讨厌|不理你|过分|凶/, '黑脸'],
+  [/哭|难过|委屈|伤心|呜呜/, '流泪'],
+  [/害怕|好怕|吓|紧张|不敢/, '流冷汗'],
+  [/晕|困惑|不懂|啥啊|啊？/, '圈圈眼'],
+  [/＞＜|>_<|扭|撒娇/, '＞＜'],
+  [/笑|开心|好耶|嘿嘿|哈哈|嘻嘻/, '兔牙'],
+  [/得意|厉害|偷偷|屑/, '屑屑眼'],
+];
+function setEmotion(text){
+  if(!text) return;
+  const hit = EMO.find(([re]) => re.test(text));
+  if(!hit) return;
+  const name = hit[1];
+  if(l2dReady){ try{ l2dModel.expression(name); }catch(e){} }
+  emotionNow = name; emotionUntil = performance.now() + 6000;
+  /* VTS 那边要文件名，Exp3 里就是 名字.exp3.json */
+  vtsPost('/api/vts/expression', {name: name + '.exp3.json', active: true, fade: 0.35});
+}
+
+/* ---------- VTube Studio：把口型推过去 ----------
+   VTS 认的是它自己的输入参数 MouthOpen（0~1），不是模型的 ParamMouthOpenY。
+   节流 40ms（25Hz）就够，接口在本机，延迟 1~2ms。 */
+const VTS_MOUTH = location.search.includes('render=vts') || !location.search.includes('novts');
+let vtsLastSent = 0, vtsLastVal = -1;
+function vtsPost(path, body){
+  try{
+    return fetch(path, {
+      method: 'POST', cache: 'no-store',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body || {})
+    }).catch(() => {});
+  }catch(e){ return null; }
+}
+function pushMouth(t, open, smile){
+  if(!VTS_MOUTH) return;
+  if(t - vtsLastSent < 40) return;
+  if(Math.abs(open - vtsLastVal) < 0.012 && open > 0.01) return;   // 变化太小就不发
+  vtsLastSent = t; vtsLastVal = open;
+  vtsPost('/api/mouth', {open: open, smile: smile});
+}
+
+/* ---------- 注意力：鼠标跟随；2.6 秒没人动就自己东张西望 ---------- */
+const POSE_FIX = /pose=(1|max)/.test(location.search);
+let poseX = 0, poseY = 0, targetX = 0, targetY = 0;
+let lastMouseT = 0, wanderX = 0, wanderY = 0, wanderT = 0;
+window.addEventListener('mousemove', e => {
+  targetX = (e.clientX / innerWidth  - .5) * 2;
+  targetY = (e.clientY / innerHeight - .5) * 2;
+  lastMouseT = performance.now();
+});
+let lastFace = null;          // 最近一次 MediaPipe 结果
+let faceLook = false;         // 他在镜头里吗
+function poseStep(t){
+  if(POSE_FIX){ targetX = 0.92; targetY = -0.30; }
+  else if(faceLook && lastFace){          // 他在看我 → 优先跟着他的头转
+    targetX = Math.max(-1, Math.min(1, -lastFace.yaw / 30));
+    targetY = Math.max(-1, Math.min(1, -lastFace.pitch / 30));
+  }
+  else if(t - lastMouseT > 2600){
+    if(t - wanderT > 1500){
+      wanderT = t;
+      wanderX = (Math.random() * 2 - 1) * 0.55;
+      wanderY = (Math.random() * 2 - 1) * 0.45;
+    }
+    targetX = wanderX; targetY = wanderY;
+  }
+  poseX += (targetX - poseX) * 0.055;
+  poseY += (targetY - poseY) * 0.045;
+}
+(function poseLoop(){ poseStep(performance.now()); requestAnimationFrame(poseLoop); })();
+
+/* 等 Pixi 与模型脚本就绪再初始化（它们在本脚本之后才加载） */
+window.addEventListener('load', () => setTimeout(initLive2D, 60));
+/* 眨眼交给模型的 EyeBlink 参数组，这里不再手工操作 DOM（原来引用 eyeL/eyeR 会 ReferenceError） */
+
+/* ---------- 音量条 ---------- */
+const BARS = 26;
+const vol = $('vol');
+for(let i=0;i<BARS;i++) vol.appendChild(document.createElement('i'));
+const bars = [...vol.children];
+
+/* ---------- 音频引擎：她的声音由 /api/say 生成，真振幅驱动嘴和音量条 ---------- */
+const subText = $('subText');
+let ac = null, analyser = null, audioEl = null, srcNode = null, outBuf = null;
+let playing = false, outRms = 0, curText = '', curDur = 0, lastSpoken = '', lastSpokeAt = 0;
+/* 口型平滑用的状态（换成真 Live2D 后仍由 startRaf 每帧算，再喂给 driveL2D / pushMouth） */
+let mouthOpen = 0, mouthWide = 1, mouthPhase = 0;
+let SR_STREAM = 22050;
+/* 自测开关：?mouth=1 让口型自己开合；?mouth=0.6 固定张开度；?mouth=0 强制闭嘴 */
+const QS = location.search;
+const MOUTH_FIX = (() => { const m = QS.match(/mouth=([\d.]+)/); return m ? parseFloat(m[1]) : null; })();
+const FORCE_MOUTH = MOUTH_FIX !== null;
+let subT0 = performance.now();
+let voiceReady = false;
+
+function fallbackSub(line, typing){
+  if(line === curText && typing) return;
+  curText = line;
+  subText.textContent = '';
+  const cur = document.createElement('span');
+  cur.className = 'cur';
+  let i = 0;
+  const t = setInterval(()=>{
+    if(i >= line.length){ clearInterval(t); subText.appendChild(cur); return; }
+    subText.textContent = line.slice(0, ++i);
+  }, 46);
+}
+
+async function connect(){
+  const btn = $('gateBtn');
+  btn.disabled = true; btn.textContent = '连 接 中';
+  try{
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    ac.resume().catch(()=>{});          // 别 await：某些环境 resume() 永不返回，会卡在接通闸
+    analyser = ac.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.55;
+    audioEl = new Audio();
+    audioEl.preload = 'auto';
+    srcNode = ac.createMediaElementSource(audioEl);
+    srcNode.connect(analyser);
+    analyser.connect(ac.destination);
+    audioEl.onended = ()=>{ playing = false; };
+    outBuf = new Uint8Array(analyser.fftSize);
+    $('gate').classList.add('gone');
+    setTimeout(()=>{ $('gate').style.display = 'none'; }, 520);
+    startRaf();
+    pumpInbox();
+    initChatBar();
+    setTimeout(()=>{ say('接通了。我看得见你。'); }, 700);
+  }catch(e){
+    $('gateMsg').textContent = '音频初始化失败：' + e.message;
+    if($('chatInput')) $('chatInput').placeholder = '接通失败：' + e.message;
+    btn.disabled = false; btn.textContent = '再 试';
+  }
+}
+
+/* ---------- QQ → 网页：轮询收件箱，把她在 QQ 上的回复显示并说出来 ---------- */
+let __inboxSeq = 0, __inboxPump = null;
+function pumpInbox(){
+  if(__inboxPump) return;
+  __inboxPump = setInterval(async () => {
+    try{
+      const r = await fetch('/api/inbox?after=' + __inboxSeq, {cache:'no-store'});
+      if(!r.ok) return;
+      const j = await r.json();
+      /* 第一次轮询只对齐游标：别把历史积压一口气念完 */
+      if(!window.__inboxInit){
+        window.__inboxInit = true;
+        __inboxSeq = j.seq || 0;
+        return;
+      }
+      if(!j.items || !j.items.length){ __inboxSeq = j.seq || __inboxSeq; return; }
+      for(const it of j.items){
+        __inboxSeq = Math.max(__inboxSeq, it.seq || 0);
+        if(!it.text) continue;
+        /* 走跟页面自己说话同一条路：设置字幕、播音频、驱动口型。
+           服务器已经合成过了，speak() 里那次 /api/say 会命中缓存（~0.02s）。 */
+        $('heardText').textContent = it.text.length > 26 ? it.text.slice(0, 26) + '…' : it.text;
+        history.push({role:'her', text: it.text});
+        if(history.length > 12) history.shift();
+        lastSpoken = '';
+        await speak(it.text);
+        setEmotion(it.text);
+      }
+    }catch(e){}
+  }, 800);
+}
+
+/* ---------- 页面里直接跟她打字 ---------- */
+function initChatBar(){
+  const inp = $('chatInput'), btn = $('chatSend');
+  if(!inp || !btn) return;
+  async function send(){
+    const t = (inp.value || '').trim();
+    if(!t) return;
+    inp.value = '';
+    history.push({role:'me', text:t});
+    if(history.length > 12) history.shift();
+    $('heardText').textContent = t;
+    curText = '…'; curDur = 0.8; subT0 = performance.now();
+    try{
+      const r = await fetch('/api/talk', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({text:t, state: sceneState(lastState || {}), history})
+      });
+      const j = await r.json();
+      if(j.text){ $('thinkMs').textContent = (j.ms||0) + ' ms'; await say(j.text); }
+      else { await speak('（她那边没接上话）'); }
+    }catch(e){
+      await speak('（接话服务没响应）');
+    }
+  }
+  btn.addEventListener('click', send);
+  inp.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); send(); } });
+  inp.addEventListener('focus', () => { if(window.__chatFocus) return; window.__chatFocus = 1; });
+}
+
+/* ---------- 分句 + 流水线：第一句先播，后面几句同时开始合成 ---------- */
+function splitSents(t){
+  const raw = (t || "").replace(/\s+/g, "").match(/[^。！？!?；;…]+[。！？!?；;…]*/g) || [];
+  const out = [];
+  let buf = "";
+  for(const one of raw){
+    if(buf && (buf.length + one.length) > 22){ out.push(buf); buf = one; }
+    else buf += one;
+  }
+  if(buf) out.push(buf);
+  return out.filter(x => x.trim().length > 0);
+}
+
+async function synthOne(text){
+  try{
+    const r = await fetch('/api/say', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({text, mirror:false})   // mirror=false：别回灌收件箱
+    });
+    if(!r.ok) return null;
+    return await r.json();
+  }catch(e){ return null; }
+}
+
+function waitEnded(dur){
+  return new Promise(res => {
+    let done = false;
+    const fin = () => { if(done) return; done = true;
+      audioEl.removeEventListener('ended', fin); res(); };
+    audioEl.addEventListener('ended', fin);
+    setTimeout(fin, Math.max(1800, (dur || 2) * 1000 + 1500));
+  });
+}
+
+let speakGen = 0;
+async function speakPipe(text){
+  const full = (text || "").trim();
+  if(!full) return;
+  const seq = ++speakGen;
+  lastSpokeAt = performance.now();
+  const parts = splitSents(full);
+  if(parts.length <= 1){ return speak(full); }
+
+  /* 立刻把所有句子都发出去合成 —— 服务器内部串行排队，
+     第 2 句在她念第 1 句的时候就做好了 */
+  const jobs = parts.map(p => synthOne(p));
+
+  for(let i = 0; i < parts.length; i++){
+    if(seq !== speakGen) return;             // 被新一轮打断
+    const r = await jobs[i];
+    if(!r){ fallbackSub(parts[i], false); continue; }
+    curText = parts[i]; curDur = r.dur || 2.2; subT0 = performance.now();
+    audioEl.src = r.url; audioEl.currentTime = 0;
+    try{ await audioEl.play(); playing = true; }
+    catch(e){ fallbackSub(parts[i], false); continue; }
+    await waitEnded(r.dur);
+    if(seq !== speakGen) return;
+  }
+  playing = false;
+}
+
+/* 播放方式开关。
+   默认走「整段合成 + audioEl 播放」——这条路从头到尾是一条连续的音频流，
+   不存在接缝，也就不该有爆音。流式（分块推送）是为了压首包延迟才加的，
+   但它把一条音频切成几十块、每块单独起播，接缝在浏览器里会变成「咔」。
+   想试流式：地址后面加 ?stream=1                                        */
+const USE_STREAM = /[?&]stream=1/.test(location.search);
+function say(text){
+  return USE_STREAM ? speakStream(text) : speak(text);
+}
+
+async function speak(text){
+  if(!text) return;
+  /* 防抖，不是去重：以前是「和上一句一模一样就永远不说」，
+     结果她重复一句真心话（"啃饼干呢"）时会被整段吞掉，页面看着像没回答。
+     现在只在 1.5 秒内重复才挡。 */
+  if(text === lastSpoken && (performance.now() - lastSpokeAt) < 1500) return;
+  lastSpoken = text;
+  lastSpokeAt = performance.now();
+  curText = text;                       // 先上字幕，后面出任何问题至少能看到字
+  subT0 = performance.now();
+  try{
+    const r = await fetch('/api/say', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({text, mirror:false})
+    });
+    if(!r.ok){
+      const j = await r.json().catch(()=>({}));
+      console.warn('[speak] /api/say ' + r.status + ' ' + JSON.stringify(j).slice(0, 200));
+      fallbackSub(text, false);
+      return;
+    }
+    const j = await r.json();
+    console.log('[speak] ok ' + j.url + ' dur=' + j.dur);
+    curText = text; curDur = j.dur || 2.2;
+    subT0 = performance.now();
+    audioEl.src = j.url;
+    audioEl.currentTime = 0;
+    try{
+      await audioEl.play();
+      playing = true;
+    }catch(err){
+      /* 没有音频设备（无头浏览器）或自动播放被拦：字幕照样走完，别让「说不出话」
+         看起来像「没回答」。真机上这里一般不会进。 */
+      console.warn('[speak] play() 失败，只上字幕：' + err.message);
+      playing = true;
+    }
+  }catch(e){
+    console.error('[speak] 失败：' + e.message);
+    fallbackSub(text, false);
+  }
+}
+
+/* ---------- 流式说话：边合成边播 ---------- */
+let streamGen = 0;
+/* ---------- 流式播放：环形缓冲 + ScriptProcessor ----------
+   为什么不用「每块一个 BufferSource」：
+   服务端推来的 PCM 被切成任意长度的块，每块独立起播，块首尾的波形不连续，
+   浏览器还要重采样（22050→48000），每次接缝都是一声「咔」。
+   一段 4 秒的话被切成几十块 → 满耳朵爆音。改成连续环形缓冲后，输出是一条
+   不断流的采样流，接缝在数据层面就不存在了。                            */
+const RING_CAP = 22050 * 90;
+let ringBuf = new Float32Array(RING_CAP), ringW = 0, ringR = 0, ringSize = 0;
+let spNode = null;
+let streamEpoch = 0;
+
+function ensureStreamer(){
+  if(spNode || !ac) return;
+  spNode = ac.createScriptProcessor(2048, 0, 1);
+  spNode.onaudioprocess = (ev) => {
+    const out = ev.outputBuffer.getChannelData(0);
+    if(ringSize <= 0){ out.fill(0); return; }
+    const n = Math.min(out.length, ringSize);
+    for(let i = 0; i < n; i++){
+      out[i] = ringBuf[ringR];
+      ringR = (ringR + 1) % RING_CAP;
+    }
+    if(n < out.length) out.fill(0, n);
+    ringSize -= n;
+  };
+  spNode.connect(analyser);          // 走 analyser 嘴型/音量条才动
+}
+
+function ringFlush(){ ringW = ringR = ringSize = 0; }
+
+function ringWriteF32(f32){
+  for(let i = 0; i < f32.length; i++){
+    if(ringSize >= RING_CAP){ ringR = (ringR + 1) % RING_CAP; ringSize--; }  // 满了丢最旧
+    ringBuf[ringW] = f32[i];
+    ringW = (ringW + 1) % RING_CAP;
+    ringSize++;
+  }
+}
+
+async function speakStream(text){
+  const full = (text || "").trim();
+  if(!full) return;
+  if(!ac){ fallbackSub(full, false); return; }
+  ensureStreamer();
+
+  const gen = ++streamGen;
+  const epoch = ++streamEpoch;
+  lastSpokeAt = performance.now();
+  /* 占位音如果还在响，先掐掉，免得和真答案叠在一起 */
+  try{ if(audioEl){ audioEl.pause(); audioEl.currentTime = 0; } }catch(e){}
+  ringFlush();
+
+  /* 字幕按估算时长逐字打，播完正好打完 */
+  const est = Math.max(1.4, full.length / 4.6 + 0.4);
+  curText = full; curDur = est; subT0 = performance.now();
+  playing = true;
+
+  let carry = new Uint8Array(0);
+  let fed = 0;                        // 已喂进去的采样数
+
+  const pushPcm = (bytes) => {
+    const n = bytes.length >> 1;
+    if(!n) return;
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const f = new Float32Array(n);
+    for(let i = 0; i < n; i++) f[i] = dv.getInt16(i * 2, true) / 32768;
+    /* 上下文采样率和音频不一致时做线性插值，否则会变调 */
+    if(ac.sampleRate !== SR_STREAM){
+      const ratio = ac.sampleRate / SR_STREAM;
+      const m = Math.floor(n * ratio);
+      const g = new Float32Array(m);
+      for(let i = 0; i < m; i++){
+        const x = i / ratio, i0 = Math.floor(x), fr = x - i0;
+        const a = f[i0] || 0, b = f[i0 + 1] !== undefined ? f[i0 + 1] : a;
+        g[i] = a + (b - a) * fr;
+      }
+      ringWriteF32(g);
+      fed += m;
+    }else{
+      ringWriteF32(f);
+      fed += n;
+    }
+  };
+
+  try{
+    const res = await fetch('/api/say/stream', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({text: full})
+    });
+    if(!res.ok || !res.body){ playing = false; speak(full); return; }
+    SR_STREAM = parseInt(res.headers.get('X-Sample-Rate') || '22050', 10) || 22050;
+    const reader = res.body.getReader();
+    while(true){
+      const rd = await reader.read();
+      if(rd.done) break;
+      if(gen !== streamGen){ try{ reader.cancel(); }catch(e){} return; }
+      let merged = rd.value;
+      if(carry.length){
+        merged = new Uint8Array(carry.length + rd.value.length);
+        merged.set(carry, 0); merged.set(rd.value, carry.length);
+      }
+      const odd = merged.length & 1;
+      const usable = merged.length - odd;
+      if(usable > 0) pushPcm(merged.subarray(0, usable));
+      carry = odd ? merged.slice(usable) : new Uint8Array(0);
+    }
+    if(carry.length >= 2) pushPcm(carry);
+
+    /* 等内容真的播完（环形缓冲清空 + 200ms 尾巴） */
+    const totalSec = fed / ac.sampleRate;
+    const deadline = performance.now() + (totalSec + 3) * 1000;
+    while(ringSize > 0 && performance.now() < deadline){
+      await new Promise(r => setTimeout(r, 80));
+      if(gen !== streamGen) return;
+    }
+    await new Promise(r => setTimeout(r, 180));
+  }catch(e){
+    /* 流式这条路挂了就退回整段合成：慢，但一定出得了声 */
+    playing = false;
+    if(gen === streamGen) speak(full);
+  }finally{
+    if(gen === streamGen) playing = false;
+    if(epoch === streamEpoch) ringFlush();
+  }
+}
+
+function startRaf(){
+  (function loop(){
+    const t = performance.now() / 1000;
+    analyser.getByteTimeDomainData(outBuf);
+    let s = 0;
+    for(let i=0;i<outBuf.length;i++){ const v = (outBuf[i]-128)/128; s += v*v; }
+    outRms = Math.sqrt(s/outBuf.length);
+
+    /* 口型：open 由她自己的输出音量决定，wide 由谱质心决定（低频→圆嘴，高频→扁嘴）
+       快起慢落，说话才像有牙关；按帧插值而不是切图，所以不会闪 */
+    const freq = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(freq);
+
+    let num = 0, den = 0;
+    for(let i=2;i<freq.length;i++){ num += i*freq[i]; den += freq[i]; }
+    const centroid = den > 0 ? (num/den) / freq.length : 0;   // 0~1 归一
+
+    let tgtOpen;
+    if(FORCE_MOUTH){
+      if(MOUTH_FIX > 0 && MOUTH_FIX < 1){
+        tgtOpen = MOUTH_FIX;                       // 固定张开度，用来验收
+      }else{
+        mouthPhase += 0.055;                       // =1 时自己开合
+        tgtOpen = 0.30 + 0.42 * (0.5 + 0.5*Math.sin(mouthPhase)) * (0.7 + 0.3*Math.sin(mouthPhase*2.7));
+      }
+    }else{
+      tgtOpen = playing ? Math.min(1, Math.max(0, (outRms - 0.011) / 0.072)) : 0;
+    }
+    mouthOpen += (tgtOpen - mouthOpen) * (tgtOpen > mouthOpen ? 0.50 : 0.20);
+    pushMouth(t, mouthOpen, 0.35 + 0.45 * mouthOpen);
+    if(mouthOpen < 0.006) mouthOpen = 0;
+
+    const tgtWide = playing || FORCE_MOUTH
+      ? 0.90 + 0.36 * Math.min(1, centroid / 0.34)
+      : 1;
+    mouthWide += (tgtWide - mouthWide) * 0.28;
+
+    /* 真 Live2D：口型交给 ParamMouthOpenY，0~1 只取 85% 免得夸张 */
+    mouthP = Math.min(1, mouthOpen * 0.85);
+
+    /* 音量条：她说话时用输出频谱，安静时跟麦克风（让「她在听」也是活的） */
+    const micLv = (lastState && lastState.audio) ? (lastState.audio.rms || 0) : 0;
+    const micAmp = Math.min(1, Math.max(0, (micLv - 0.010) / 0.055));
+    const per = Math.floor(freq.length / BARS);
+    bars.forEach((b,i)=>{
+      let h;
+      if(playing){
+        let m = 0;
+        for(let k=0;k<per;k++) m = Math.max(m, freq[i*per+k] || 0);
+        h = 4 + (m/255) * 44;
+      }else{
+        const w = 0.45 + 0.55 * Math.abs(Math.sin(t/300 + i*0.62));
+        h = 4 + micAmp * 40 * w;
+      }
+      b.style.height = h.toFixed(1) + 'px';
+      b.classList.toggle('hot', h > 30);
+    });
+
+    /* 字幕：以音频进度为主，音频不前进时退回挂钟（headless / 无声设备也能走字） */
+    if(playing && curText){
+      const d = (audioEl && audioEl.duration > 0.02) ? audioEl.duration : curDur;
+      const advanced = audioEl && audioEl.currentTime > 0.02;
+      const t = advanced ? audioEl.currentTime
+                         : Math.min(d, (performance.now() - subT0) / 1000);
+      const p = Math.min(1, t / Math.max(0.2, d - 0.05));
+      const n = Math.round(curText.length * p);
+      if(subText.textContent.length !== n) subText.textContent = curText.slice(0, n);
+    }
+    requestAnimationFrame(loop);
+  })();
+}
+
+/* ---------- 台词调度：按真实状态挑一句，冷却 8 秒 ---------- */
+const LINES = {
+  dark:  ['……摄像头那边好像断了，我等你一下。', '画面没了，你别走开。'],
+  hear:  ['嗯，我在听你说。', '你说，我听着。', '嗯。'],
+  see:   ['我看见你了，别动那么远嘛。', '你今天气色还行嘛。', '灯有点亮，我眯一下。', '你刚才动了一下。'],
+  idle:  ['安静下来了……你在想什么？', '我在这儿。', '要不要说点什么。']
+};
+let lastKind = '', lastIdx = -1;
+function pick(arr){
+  if(arr.length === 1) return arr[0];
+  let i = Math.floor(Math.random()*arr.length);
+  if(i === lastIdx) i = (i+1) % arr.length;
+  lastIdx = i;
+  return arr[i];
+}
+/* ---------- 说话：老台词兜底 ---------- */
+let lastState = null;
+function sayCanned(kind){
+  if(!ac || playing) return;
+  speak(pick(LINES[kind]));
+}
+
+/* ---------- 她会接话：真模型 ---------- */
+const history = [];      // [{role:'me'|'her', text}]
+let lastHeardSeq = 0, thinkBusy = false, lastRespondAt = 0, lastHeardAt = 0;
+
+function sceneState(s){
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2,'0'), mm = String(d.getMinutes()).padStart(2,'0');
+  const quiet = lastRespondAt ? Math.round((Date.now()-lastRespondAt)/1000) : 0;
+  return {
+    clock: hh + ':' + mm,
+    bright: (s.video||{}).brightness,
+    motion: (s.video||{}).motion,
+    cam: !!(s.video||{}).alive,
+    quiet_s: quiet,
+    face: s.face || null
+  };
+}
+
+/* 他刚开口、真答案还在合成 → 先抢一句「嗯？」，把空白盖掉 */
+let phCache = [];
+async function grabPlaceholder(){
+  try{
+    const r = await fetch('/api/placeholder', {cache:'no-store'});
+    if(!r.ok) return null;
+    return await r.json();
+  }catch(e){ return null; }
+}
+async function placeholderThen(work){
+  /* 只要不是刚说完话，就先抢一声「嗯？」——
+     心理上"有反应"比"更快出完整答案"重要得多，这几秒就不会觉得卡 */
+  const idle = performance.now() - (lastSpokeAt || 0);
+  const ph = (!playing && idle > 2200) ? await grabPlaceholder() : null;
+  if(ph && ph.url){
+    curText = ''; /* 占位音不写字幕，免得字幕闪 */
+    audioEl.src = ph.url; audioEl.currentTime = 0;
+    audioEl.play().catch(()=>{});
+    playing = true;
+  }
+  const out = await work();
+  return out;
+}
+
+async function respond(heard){
+  if(!ac || thinkBusy) return;
+  thinkBusy = true;
+  try{
+    const j = await placeholderThen(async () => {
+      const r = await fetch('/api/think', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({heard: heard || '', state: sceneState(lastState || {}), history})
+      });
+      if(!r.ok) throw new Error('think ' + r.status);
+      return await r.json();
+    });
+    const line = (j.text || '').trim();
+    if(!line) throw new Error('empty');
+    history.push({role:'her', text: line});
+    if(history.length > 12) history.shift();
+    lastRespondAt = Date.now();
+    await setEmotion(line); say(line);
+    $('thinkMs').textContent = j.ms + ' ms';
+  }catch(e){
+    /* 模型没起来就退回现成台词，别让她哑掉 */
+    const s = lastState || {}, v = s.video || {};
+    sayCanned(!v.alive ? 'dark' : (s.speaking ? 'hear' : 'see'));
+    $('thinkMs').textContent = 'off';
+  }finally{
+    thinkBusy = false;
+  }
+}
+
+/* 她自己开口：安静太久了主动说一句 */
+setInterval(()=>{
+  if(!ac || playing || thinkBusy) return;
+  if(Date.now() - lastRespondAt < 28000) return;
+  respond('');
+}, 5000);
+
+/* ---------- 读真实状态 ---------- */
+let ok = 0, bad = 0;
+async function tick(){
+  try{
+    const r = await fetch('state-vision.json?_=' + Date.now(), {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const s = await r.json();
+    ok++; bad = 0;
+    $('errBox').style.display = 'none';
+
+    const v = s.video || {}, a = s.audio || {};
+    $('fps').textContent = (v.fps != null ? v.fps.toFixed(1) : '—') + ' fps';
+    $('bright').textContent = v.brightness != null ? (v.brightness*100).toFixed(1) + ' %' : '—';
+    $('brightBar').style.width = Math.min(100, (v.brightness||0)*140) + '%';
+    $('motion').textContent = v.motion != null ? v.motion.toFixed(4) : '—';
+    $('motionBar').style.width = Math.min(100, (v.motion||0)*900) + '%';
+    $('rms').textContent = a.rms != null ? a.rms.toFixed(4) : '—';
+    const up = s.uptime || 0;
+    $('uptime').textContent = up < 60 ? up.toFixed(0)+' s'
+      : up < 3600 ? (up/60).toFixed(1)+' min' : (up/3600).toFixed(2)+' h';
+    $('memUsage').textContent = (v.frames||0).toLocaleString() + ' frames';
+    $('linkState').textContent = v.alive && a.alive ? 'LINK OK' : 'PARTIAL';
+    $('presenceState').textContent = s.presence ? 'PRESENT' : 'IDLE';
+    $('voiceState').textContent = s.speaking ? 'SPEAKING' : 'LISTENING';
+
+    /* 他说话了 → 交给模型接话 */
+    lastState = s;
+    lastFace = s.face || null;
+    const onCam = !!(lastFace && lastFace.present);
+    $('faceLook').textContent = onCam ? lastFace.look : '没看到人';
+    $('faceEmo').textContent = onCam
+        ? (lastFace.emo + ' · 笑 ' + Math.round((lastFace.smile || 0) * 100) + '%'
+           + ' · 眼 ' + Math.round((lastFace.eyes_open || 0) * 100) + '%') : '—';
+    faceLook = onCam && Math.abs(lastFace.yaw) < 45;
+    const hd = s.heard || {};
+    if(hd.seq && hd.seq !== lastHeardSeq){
+      lastHeardSeq = hd.seq;
+      if(hd.text){
+        history.push({role:'me', text: hd.text});
+        if(history.length > 12) history.shift();
+        $('heardText').textContent = hd.text;
+        lastHeardAt = Date.now();
+        respond(hd.text);
+      }
+    }
+
+    $('callState').textContent = playing ? '通话中 · 她在说'
+      : s.speaking ? '通话中 · 她在听'
+      : s.presence ? '通话中 · 她正在看你' : '通话中 · 她在等你';
+    $('voiceState').textContent = playing ? 'TALKING'
+      : s.speaking ? 'YOU TALK' : 'LISTENING';
+
+  }catch(e){
+    bad++;
+    if(bad >= 3){
+      $('errBox').style.display = 'block';
+      $('errBox').innerHTML = '读不到 state-vision.json<br><span style="color:#9fd4e8">'
+        + e.message + '</span><br><br>要从 HTTP 打开这个页面，不要双击 file://<br>'
+        + '<code style="color:#4dd0e1">D:\\sakana-py\\python.exe -m http.server 8770 --directory "D:\\deepseek harness\\ai-live"</code>';
+    }
+  }
+}
+tick();
+setInterval(tick, 250);
+
+/* 摄像头小窗每 5 秒刷一次（vision.py 需带 --snap-every 5） */
+/* MJPEG 是长连接，不用轮询；只有流断了才回退到快照 */
+  $('camImg').addEventListener('error', ()=>{
+    const im = $('camImg');
+    setTimeout(()=>{ im.src = '/cam.mjpg?r=' + Date.now(); }, 1500);
+  });
+
+/* ---------- 接通闸 & 语音服务状态 ---------- */
+$('gateBtn').addEventListener('click', connect);
+
+async function pollVoice(){
+  try{
+    const r = await fetch('/api/status', {cache:'no-store'});
+    const j = await r.json();
+    voiceReady = !!j.ready;
+    if(!voiceReady){
+      $('gateMsg').textContent = '她的声音正在加载（' + (j.state || '…') + '）· 也能先接通看图';
+    }else{
+      $('gateMsg').textContent = '接通后她就看得见你，也会出声';
+    }
+  }catch(e){
+    voiceReady = false;
+    $('gateMsg').textContent = '语音服务没起来 · 先接通也能看图';
+  }
+}
+pollVoice();
+setInterval(pollVoice, 3000);
+
+/* 截图/自测用：?auto=1 直接接通，不用手点（同步调用，headless 截图才等得到） */
+if(location.search.indexOf('auto=1') >= 0){
+  try{ connect(); }catch(e){ $('gateMsg').textContent = '自动接通失败：' + e.message; }
+}
+/* 自测用：?mouth=1 让口型自己开合，验证连续口型 */
+if(location.search.indexOf('mouth=1') >= 0){
+  setTimeout(()=>{ $('voiceState').textContent = 'TALKING'; }, 800);
+}
+</script>
+<script>
+/* 去掉鼻梁上那块多余的黑网格。
+   定位方法：sdk2.html 里按「贴图不透明且很暗 + 屏幕包围盒很小」筛候选，
+   再逐个在 pixi 上隐藏验证 —— 命中的是第 513、514 号（成对，落在脸中线 y≈0.59）。
+   Cubism Core 的 drawables.opacities 是 wasm 堆上的 Float32Array 视图，
+   在 coreModel.update() 之后写 0，渲染器这一帧读到的就是 0。 */
+(function () {
+  /* 这四个网格的贴图是「整块纯黑 + alpha 满」—— 正常美术不会这么画，
+     它们是小道具/图标/遮罩残留。253/383 左右对称成一组，513/514 落在脸中线。
+     不同分辨率、不同 idle 姿态下露出来的是哪一个不固定，所以四个一起关。 */
+  var HIDE = [253, 383, 513, 514];
+  var diag = null;
+  if (/[?&]diag=1/.test(location.search)) {
+    diag = document.createElement('div');
+    diag.style.cssText = 'position:fixed;left:12px;bottom:64px;z-index:60;font:11px/1.5 ui-monospace,Consolas,monospace;'
+      + 'color:#8fd8ff;background:rgba(4,12,22,.82);border:1px solid rgba(90,200,255,.35);'
+      + 'border-radius:6px;padding:6px 9px;white-space:pre;pointer-events:none';
+    document.body.appendChild(diag);
+  }
+  var tries = 0;
+  var timer = setInterval(function () {
+    if (++tries > 300) { clearInterval(timer); return; }
+    var l2 = window.__l2d && window.__l2d.model;
+    if (!l2 || l2.__hideHooked) return;
+    l2.__hideHooked = 1;
+    clearInterval(timer);
+    var cm = l2.internalModel.coreModel;
+    var orig = cm.update.bind(cm);
+    cm.update = function (dt) {
+      orig(dt);
+      try {
+        var d = cm._model && cm._model.drawables;
+        if (d && d.opacities) {
+          for (var i = 0; i < HIDE.length; i++) d.opacities[HIDE[i]] = 0;
+          if (diag) {
+            var ops = HIDE.map(function (k) {
+              return k + '=' + (d.opacities[k] === undefined ? '?' : d.opacities[k].toFixed(2));
+            }).join(' ');
+            window.__l2dDiag = '网格 ' + d.count + ' / 隐藏 ' + HIDE.length + '\n' + ops
+              + '\n画布 ' + (window.__l2d.app && window.__l2d.app.renderer
+                ? window.__l2d.app.renderer.width + 'x' + window.__l2d.app.renderer.height : '?');
+            diag.textContent = window.__l2dDiag;
+          }
+        }
+      } catch (e) {}
+    };
+    console.log('[fix] 已屏蔽多余网格 ' + HIDE.join(','));
+  }, 300);
+})();
+</script>
+<script>
+/* 渲染目标：默认还是 canvas；?render=vts 就把画面交给 VTube Studio */
+if(location.search.includes('render=vts')){
+  document.body.classList.add('render-vts');
+  if(location.search.includes('nohint')) document.body.classList.add('no-hint');
+}
+</script>
+<script>
+(function(){
+/* ── 等比缩放舞台 ─────────────────────────────────────── */
+function fit(){
+  const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+  document.getElementById('stage').style.transform =
+    'translate(-50%,-50%) scale(' + s + ')';
+}
+addEventListener('resize', fit); fit();
+
+/* ── 左列：8 项生命指标 ──────────────────────────────── */
+const LEFT = [
+  ['System initial',      () => upStr(),              ''],
+  ['Memory consolidation',() => mem.docs + ' docs',   ''],
+  ['Cognitive load',      () => (S.think || '—') + ' ms', ''],
+  ['Image analysis',      () => fpsStr(),             ''],
+  ['Speech analysis',     () => rmsStr(),             ''],
+  ['Face tracking',       () => faceStr(),            ''],
+  ['Behavior parameters', () => behStr(),             'warm'],
+  ['Environment',         () => brightStr(),          ''],
+];
+
+/* ── 真实数据 ─────────────────────────────────────────── */
+const FIRST_MET = new Date('2026-10-29T12:27:00+08:00').getTime();
+const mem = { docs: 176, atoms: 747, nodes: 1335, edges: 5278 };
+const S = { up: null, fps: null, rms: null, think: null, face: null, playing: false };
+
+function pad(n){ return String(n).padStart(2, '0'); }
+function upStr(){
+  if(S.up == null) return '—';
+  const s = Math.floor(S.up);
+  return pad(Math.floor(s/3600)) + ':' + pad(Math.floor(s%3600/60)) + ':' + pad(s%60);
+}
+function fpsStr(){ return S.fps == null ? '—' : S.fps.toFixed(1) + ' fps · 640×480'; }
+function rmsStr(){ return S.rms == null ? '—' : S.rms.toFixed(4) + ' rms'; }
+function faceStr(){
+  const f = S.face;
+  if(!f || !f.present) return 'no face';
+  return 'yaw ' + Math.round(f.yaw) + '° · pitch ' + Math.round(f.pitch) + '°';
+}
+function behStr(){
+  if(S.playing) return 'speaking';
+  const f = S.face;
+  if(f && f.present) return Math.abs(f.yaw) < 20 ? 'looking' : 'glancing';
+  return 'idle';
+}
+function brightStr(){
+  return S.bright == null ? '—' : Math.round(S.bright * 100) + '% 光';
+}
+
+function renderLeft(){
+  document.getElementById('colL').innerHTML = LEFT.map(([label, fn, cls], i) => {
+    const html = '<div class="row ' + (cls || '') + '"><em>' + label + '</em><b>' + fn() + '</b></div>';
+    return html;
+  }).join('');
+}
+
+/* ── 底部：相处时间，每秒跳 ──────────────────────────── */
+function renderClock(){
+  const ms = Date.now() - FIRST_MET;
+  const total = Math.floor(ms / 1000);
+  const d = Math.floor(total / 86400);
+  const h = Math.floor(total % 86400 / 3600);
+  const m = Math.floor(total % 3600 / 60);
+  const s = total % 60;
+  const Y = Math.floor(d / 365), M = Math.floor(d % 365 / 30), D = d % 30;
+  document.getElementById('fClock').innerHTML =
+    Y + '<i>Y</i> ' + M + '<i>M</i> ' + D + '<i>D</i> ' + pad(h) + ':' + pad(m) + ':' + pad(s);
+  document.getElementById('tDate').textContent = new Date()
+    .toLocaleDateString('zh-CN', {year:'numeric', month:'2-digit', day:'2-digit'})
+    .replace(/\//g, ' · ');
+}
+
+/* ── 识海：直接画 livingmemory 的真实知识图谱 ──────────────
+   数据由 gen_memory_graph.py 从 livingmemory.db 导出：
+     graph_nodes 里取度数最高的 900 个实体，沿 graph_edges 的真实边
+     做过 6 轮「弹簧 + 回归球面」，所以有关系的记忆会自己聚成团。
+   点的颜色 = 节点类型，大小 = 度数（log），亮度 = 深度 + 新近度。 */
+(function mind(){
+  const cv = document.getElementById('mindCv');
+  if(!cv) return;
+  const cx = cv.getContext('2d');
+  const W = cv.width, H = cv.height, C = W / 2, R = W / 2 - 8;
+
+  let pts = null, links = null;
+
+  /* 读不到真实图谱时退回占位星云，别开天窗 */
+  function fallback(){
+    pts = [];
+    for(let i = 0; i < 900; i++){
+      const u = Math.random() * 2 - 1, th = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(1 - u * u);
+      pts.push({x: r*Math.cos(th), y: u, z: r*Math.sin(th), d: 1, t: 6, a: 60, r: 1});
+    }
+    links = [];
+    for(let i = 0; i < 3800; i++){
+      const a = (Math.random()*900)|0, b = (Math.random()*900)|0;
+      if(a !== b) links.push([a, b, 0.5]);
+    }
+  }
+
+  const TONE = [
+    [232, 212, 174],   // topic        暖
+    [206, 220, 234],   // fact         冷
+    [176, 186, 200],   // entity
+    [214, 190, 168],   // event
+    [198, 206, 222],   // person
+    [226, 216, 198],   // preference
+    [148, 156, 170],   // other
+  ];
+
+  let ang = 0;
+
+  function draw(){
+    if(!pts){ requestAnimationFrame(draw); return; }
+    ang += 0.0022;
+    const cos = Math.cos(ang), sin = Math.sin(ang);
+    const n = pts.length;
+    const px = new Float32Array(n), py = new Float32Array(n), pz = new Float32Array(n);
+
+    for(let i = 0; i < n; i++){
+      const p = pts[i];
+      const rr = p.r == null ? 1 : p.r;        // 度数层：核心小半径、外围大半径
+      const x = p.x * cos - p.z * sin;
+      const z = p.x * sin + p.z * cos;
+      const k = 1 / (2.4 - z * 0.9);
+      px[i] = C + x * R * 1.75 * k;
+      py[i] = C + p.y * R * 1.75 * k;
+      pz[i] = z * rr;
+    }
+    cx.clearRect(0, 0, W, H);
+
+    /* 边：按平均深度分三档，每档一次 beginPath 批量描，省掉几千次状态切换 */
+    const bands = [[], [], []];
+    for(let i = 0; i < links.length; i++){
+      const a = links[i][0], b = links[i][1];
+      if(pz[a] < -0.5 && pz[b] < -0.5) continue;      // 背面整条不画
+      const zm = (pz[a] + pz[b]) * 0.5;
+      bands[zm < -0.1 ? 0 : (zm < 0.45 ? 1 : 2)].push(a, b);
+    }
+    const ALPHA = [0.05, 0.10, 0.17];
+    cx.lineWidth = 1.2;
+    for(let bi = 0; bi < 3; bi++){
+      const arr = bands[bi];
+      if(!arr.length) continue;
+      cx.strokeStyle = 'rgba(158,178,198,' + ALPHA[bi] + ')';
+      cx.beginPath();
+      for(let i = 0; i < arr.length; i += 2){
+        cx.moveTo(px[arr[i]], py[arr[i]]);
+        cx.lineTo(px[arr[i + 1]], py[arr[i + 1]]);
+      }
+      cx.stroke();
+    }
+
+    /* 点 */
+    for(let i = 0; i < n; i++){
+      if(pz[i] < -0.7) continue;
+      const p = pts[i];
+      const deg = p.d || 1;
+      const r = (0.72 + Math.log2(1 + deg) * 0.44) * (0.62 + (pz[i] + 1) * 0.46);
+      const fresh = 1 - Math.min(1, (p.a == null ? 60 : p.a) / 240);  // 越新越亮
+      const a = (0.20 + (pz[i] + 1) * 0.34) * (0.70 + fresh * 0.45);
+      const tone = TONE[p.t] || TONE[6];
+      cx.fillStyle = 'rgba(' + tone[0] + ',' + tone[1] + ',' + tone[2] + ',' +
+                     Math.min(1, a).toFixed(3) + ')';
+      cx.beginPath(); cx.arc(px[i], py[i], r, 0, 6.284); cx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+
+  (async function load(){
+    try{
+      const j = await (await fetch('memory-graph.json?t=' + Date.now(),
+                                   {cache: 'no-store'})).json();
+      if(!j.nodes || !j.nodes.length) throw new Error('图谱是空的');
+      pts = j.nodes;
+      links = j.links || [];
+      const m = j.meta || {};
+      /* 灌进 mem，tick 里写 HUD 的那几个数字就自动变真实值了
+         （原来 tick 每 500ms 把写死值覆盖回去，所以这里设了也白设） */
+      if(m.nodes_all) mem.nodes = m.nodes_all;
+      if(m.edges_all) mem.edges = m.edges_all;
+      if(m.docs_all) mem.docs = m.docs_all;
+      if(m.atoms_all) mem.atoms = m.atoms_all;
+      if(m.avg_importance != null) mem.strength = Math.round(m.avg_importance * 100);
+      /* 记忆片段：优先拿度数高的（她最在意的事），每 6 秒换一批 */
+      const pool = pts.filter(n => n.v && n.v.length > 3).map(n => ({d: n.d || 1, v: n.v}));
+      pool.sort((a, b) => b.d - a.d);
+      const hot = pool.slice(0, 240);
+      const showFrag = () => {
+        const ul = document.getElementById('fragList');
+        if(!ul) return;
+        ul.textContent = '';
+        const picks = [];
+        const used = new Set();
+        while(picks.length < 6 && picks.length < hot.length){
+          const k = (Math.random() * hot.length) | 0;
+          if(used.has(k)) continue;
+          used.add(k);
+          picks.push(hot[k]);
+        }
+        picks.forEach((it, i) => {
+          const li = document.createElement('li');
+          li.textContent = it.v;
+          li.style.animationDelay = (i * 90) + 'ms';
+          ul.appendChild(li);
+        });
+      };
+      showFrag();
+      setInterval(showFrag, 6000);
+      console.log('[mind] 真实图谱 ' + pts.length + ' 点 / ' + links.length + ' 边' +
+                  '（库内 ' + m.nodes_all + ' 点 / ' + m.edges_all + ' 边）');
+    }catch(e){
+      console.warn('[mind] 真实图谱读不到，退回占位星云：' + e.message);
+      fallback();
+    }
+  })();
+
+  draw();
+})();
+
+/* ── 拉真实状态 ──────────────────────────────────────── */
+async function poll(){
+  try{
+    const j = await (await fetch('state-vision.json?t=' + Date.now(), {cache:'no-store'})).json();
+    S.up = j.uptime;
+    S.fps = j.video && j.video.fps;
+    S.bright = j.video && j.video.brightness;
+    S.rms = j.audio && j.audio.rms;
+    S.face = j.face;
+    S.playing = !!j.speaking;
+    S.heard = j.heard || null;
+  }catch(e){}
+  try{
+    const r = await (await fetch('/api/status', {cache:'no-store'})).json();
+    if(r.think != null) S.think = r.think;
+  }catch(e){}
+}
+
+function tick(){
+  watchHeard();
+  renderLeft();
+  document.getElementById('tUp').textContent = upStr();
+  document.getElementById('tThink').textContent = (S.think || '—') + ' ms';
+  const f = S.face;
+  document.getElementById('rEmo').textContent = f && f.present ? (f.emo || '平静') : '—';
+  document.getElementById('rSmile').textContent = f && f.present ? Math.round((f.smile || 0) * 100) + '%' : '—';
+  document.getElementById('rEye').textContent = f && f.present ? Math.round((f.eyes_open || 0) * 100) + '%' : '—';
+  document.getElementById('rYaw').textContent = f && f.present ? Math.round(f.yaw) + '°' : '—';
+  document.getElementById('rPitch').textContent = f && f.present ? Math.round(f.pitch) + '°' : '—';
+  document.getElementById('rBeh').textContent = behStr();
+  document.getElementById('rBright').textContent = brightStr();
+  document.getElementById('rFps').textContent = S.fps == null ? '—' : S.fps.toFixed(1);
+  document.getElementById('mNode').textContent = mem.nodes;
+  document.getElementById('mEdge').textContent = mem.edges;
+  document.getElementById('mRatio').textContent =
+    (mem.strength != null ? mem.strength : '—') + '%';
+  const td = document.getElementById('tDocs');
+  if(td) td.textContent = mem.docs + ' docs';
+}
+
+
+/* ── 控制条：麦克风 / 发送 / 摄像头 ─────────────────── */
+let micOn = true;
+const micEl = document.getElementById('mic');
+micEl.addEventListener('click', () => {
+  micOn = !micOn;
+  micEl.classList.toggle('on', micOn);
+  document.getElementById('micTxt').textContent = micOn ? 'MIC ON' : 'MIC OFF';
+  if(!micOn){
+    /* 关麦：别再把她听到的东西往对话里送 */
+    document.getElementById('subMeta').textContent = '— microphone off';
+  }
+});
+
+/* ── 听见 → 接话 ─────────────────────────────────────
+   state-vision.json 里的 heard.seq 每变一次就是她听到一句新的。
+   和正式页同一套逻辑：关麦就不回应。 */
+let lastHeardSeq = 0, heardInit = false, thinkBusy = false;
+
+async function respondHeard(text){ return; /* 接话由正式页的 tick 负责，这里让出 */
+  if(thinkBusy) return;
+  thinkBusy = true;
+  document.getElementById('subMeta').textContent = '…';
+  document.getElementById('subMeta').textContent = '— thinking';
+  try{
+    const r = await fetch('/api/talk', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        text: text,
+        state: {clock: new Date().toTimeString().slice(0,5),
+                bright: S.bright, face: S.face || null}
+      })
+    });
+    const j = await r.json();
+    if(j.text){
+      document.getElementById('subMeta').textContent = j.text;
+      document.getElementById('subMeta').textContent = '— ' + (j.ms || 0) + ' ms · ' + (j.model || '');
+      S.think = j.ms;
+    }
+  }catch(e){
+    document.getElementById('subMeta').textContent = '（接不上话：' + e.message + '）';
+  }finally{
+    thinkBusy = false;
+  }
+}
+
+function watchHeard(){
+  const h = S.heard;
+  if(!h) return;
+  const seq = h.seq || 0;
+  if(!heardInit){            // 首轮只对齐，不补历史
+    heardInit = true;
+    lastHeardSeq = seq;
+    return;
+  }
+  if(seq === lastHeardSeq) return;
+  lastHeardSeq = seq;
+  const t = (h.text || '').trim();
+  if(!t) return;
+  if(!micOn){                // 关麦：她听见了也不回
+    document.getElementById('subMeta').textContent = '— muted（听到了：' + t.slice(0, 12) + '…）';
+    return;
+  }
+  respondHeard(t);
+}
+
+async function sendText(){ return; /* 发送由正式页的 initChatBar 负责 */
+  const inp = document.getElementById('chatInput');
+  const t = (inp.value || '').trim();
+  if(!t) return;
+  inp.value = '';
+  document.getElementById('subMeta').textContent = '…';
+  try{
+    const r = await fetch('/api/talk', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: t, state: {clock: new Date().toTimeString().slice(0,5)}})
+    });
+    const j = await r.json();
+    if(j.text){
+      document.getElementById('subMeta').textContent = j.text;
+      document.getElementById('subMeta').textContent = '— ' + (j.ms || 0) + ' ms · ' + (j.model || '');
+      S.think = j.ms;
+    }else{
+      document.getElementById('subMeta').textContent = '（她没说话）';
+    }
+  }catch(e){
+    document.getElementById('subMeta').textContent = '发不出去：' + e.message;
+  }
+}
+document.getElementById('chatSend').addEventListener('click', sendText);
+document.getElementById('chatInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); sendText(); }
+});
+
+async function loadCams(){
+  const sel = document.getElementById('cams');
+  try{
+    const j = await (await fetch('/api/cams', {cache:'no-store'})).json();
+    const cur = j.current || '';
+    sel.innerHTML = (j.cams && j.cams.length)
+      ? j.cams.map(n => '<option' + (n === cur ? ' selected' : '') + '>' + n + '</option>').join('')
+      : '<option>没找到设备</option>';
+  }catch(e){
+    sel.innerHTML = '<option>枚举失败</option>';
+  }
+}
+document.getElementById('cams').addEventListener('change', async e => {
+  const name = e.target.value;
+  document.getElementById('subMeta').textContent = '换摄像头…';
+  try{
+    await fetch('/api/cam', {method:'POST', headers:{'Content-Type':'application/json'},
+                             body: JSON.stringify({name: name})});
+    document.getElementById('subMeta').textContent = '已经切到「' + name + '」，2 秒后画面会重连。';
+    setTimeout(() => {
+      const ci = document.getElementById('camImg');
+      if(ci) ci.src = '/cam.mjpg?t=' + Date.now();
+    }, 2500);
+  }catch(err){}
+});
+loadCams();
+
+/* 背景选择：?bg=1|2|3 换图，?bg=canvas 用程序化那间房 */
+(function pickBg(){
+  const q = (location.search.match(/[?&]bg=([^&]+)/) || [])[1] || '2';
+  const el = document.getElementById('roomBg');
+  const cv = document.getElementById('roomCv');
+  if(q === 'canvas'){
+    if(el) el.style.display = 'none';
+    if(cv) cv.style.display = 'block';
+    return;
+  }
+  const n = ['1', '2', '3'].includes(q) ? q : '1';
+  if(el) el.style.backgroundImage = 'url(bg/room' + n + '.png)';
+  if(cv) cv.style.display = 'none';
+})();
+
+setInterval(poll, 1200); poll();
+setInterval(tick, 500); tick();
+setInterval(renderClock, 1000); renderClock();
+})();
+</script>
+<script src="room.js"></script>
+</body>
+</html>
