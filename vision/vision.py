@@ -55,7 +55,7 @@ def cur_dev():
         pass
     return VIDEO_DEV
 AUDIO_DEV = "audio=麦克风阵列 (Senary Audio)"
-W, H, FPS = 640, 480, 15
+W, H, FPS = 640, 480, 24   # 15 -> 24：单帧年龄从 67ms 降到 42ms，CPU 还扛得住
 FSZ = W * H * 3
 ASZ = 16000 * 2 // 10          # 100ms 音频块
 
@@ -125,7 +125,11 @@ def video_loop(S):
             time.sleep(0.8)
             continue
         cmd = [FFMPEG, "-hide_banner", "-loglevel", "error",
-               "-f", "dshow", "-rtbufsize", "50M",
+               # 低延迟三件套：nobuffer 不让解复用攒帧、low_delay 关掉内部
+               # 重排序、probesize/analyzeduration 压到最小跳过探测。
+               "-fflags", "nobuffer", "-flags", "low_delay",
+               "-probesize", "32", "-analyzeduration", "0",
+               "-f", "dshow", "-rtbufsize", "8M",
                "-video_size", f"{W}x{H}", "-framerate", str(FPS),
                "-i", cur_dev(),
                "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
@@ -170,7 +174,7 @@ def video_loop(S):
                                brightness=round(bright, 4), motion=round(motion, 4),
                                fps=round(fps, 1))
             # 每 2 帧写一张 latest.jpg（约 7.5fps），写临时文件再改名，避免读到半张图
-            if fno % 2 == 0:
+            if True:   # 每帧都写（原来每 2 帧一次）：15fps 下省掉约 33ms
                 try:
                     import cv2
                     ok, enc = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 68])

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>摄像头延迟对比 · old vs new</title>
+<style>
+  :root{--ink:#c7c8cb;--dim:#8a8f96;--warm:#d9c49a;--line:#3c4351;--good:#7fd8a0;--bad:#e0735f}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#07090d;color:var(--ink);
+    font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{display:grid;grid-template-columns:1fr 1fr;gap:1px;height:100%;background:#1a1f27}
+  .pane{background:#07090d;display:flex;flex-direction:column;padding:16px}
+  .pane h2{margin:0 0 10px;font-size:13px;font-weight:500;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--dim);display:flex;align-items:center;gap:8px}
+  .pane h2 b{font-family:ui-monospace,Consolas,monospace;font-size:11px;
+    padding:2px 7px;border-radius:3px;font-weight:400}
+  .old h2 b{color:var(--bad);border:1px solid rgba(224,115,95,.4)}
+  .new h2 b{color:var(--good);border:1px solid rgba(127,216,160,.4)}
+  .screen{position:relative;flex:1;background:#000;border:1px solid var(--line);
+    border-radius:4px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+  canvas{width:100%;height:100%;object-fit:contain;display:block}
+  .stats{margin-top:12px;font-family:ui-monospace,Consolas,monospace;font-size:12px;
+    line-height:1.85;color:var(--dim)}
+  .stats b{color:var(--ink);font-weight:400}
+  .big{font-size:34px;font-weight:300;letter-spacing:-.02em;color:#fff;
+    font-family:ui-monospace,Consolas,monospace;line-height:1.1}
+  .big.good{color:var(--good)}
+  .big.bad{color:var(--bad)}
+  .hint{position:fixed;left:0;right:0;bottom:10px;text-align:center;font-size:11px;
+    color:#5b626b;font-family:ui-monospace,Consolas,monospace}
+  .err{color:var(--bad);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="pane old">
+    <h2>现在的做法 <b>old · 15fps · 每 2 帧 · 50ms 轮询</b></h2>
+    <div class="screen"><canvas id="cvA"></canvas></div>
+    <div class="stats">
+      <div class="big bad" id="lagA">— ms</div>
+      <div>p50 <b id="p50A">—</b> · p95 <b id="p95A">—</b> · 最差 <b id="maxA">—</b></div>
+      <div>收到 <b id="nA">0</b> 帧 · 实测 <b id="fpsA">—</b> fps</div>
+    </div>
+  </div>
+  <div class="pane new">
+    <h2>低延迟改法 <b>new · 30fps · 每帧 · 零轮询</b></h2>
+    <div class="screen"><canvas id="cvB"></canvas></div>
+    <div class="stats">
+      <div class="big good" id="lagB">— ms</div>
+      <div>p50 <b id="p50B">—</b> · p95 <b id="p95B">—</b> · 最差 <b id="maxB">—</b></div>
+      <div>收到 <b id="nB">0</b> 帧 · 实测 <b id="fpsB">—</b> fps</div>
+    </div>
+  </div>
+</div>
+<div class="hint">延迟 = 这一帧从摄像头读出来 → 现在画到屏幕上，两个面板测的是同一条链路，只差参数</div>
+
+<script>
+/* 二进制帧格式：[4B 'JPEG'][8B 采集时刻 ms, float64][4B 长度][jpeg]
+   页面自己解析、自己 createImageBitmap —— 这样才能拿到每一帧的采集时刻，
+   用 <img src=...> 是读不到时间的。 */
+const buf = { A: new Uint8Array(0), B: new Uint8Array(0) };
+const stat = { A: { lags: [], n: 0, t0: 0 }, B: { lags: [], n: 0, t0: 0 } };
+
+function concat(a, b){
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0); out.set(b, a.length);
+  return out;
+}
+
+function take(raw){                 // 从缓冲区里切出一帧，返回 [ts, jpegBytes] 或 null
+  if(raw.length < 16) return null;
+  if(!(raw[0]===74 && raw[1]===80 && raw[2]===69 && raw[3]===71)){   // 'JPEG'
+    const at = raw.indexOf(74);
+    return { skip: at > 0 ? at : 4 };
+  }
+  const dv = new DataView(raw.buffer, raw.byteOffset, 16);
+  const ts = dv.getFloat64(4, true);
+  const len = dv.getUint32(12, true);
+  if(raw.length < 16 + len) return null;
+  return { ts: ts, jpeg: raw.subarray(16, 16 + len), used: 16 + len };
+}
+
+function paint(cv, bmp){
+  const ctx = cv.getContext('2d');
+  if(cv.width !== bmp.width){ cv.width = bmp.width; cv.height = bmp.height; }
+  ctx.drawImage(bmp, 0, 0);
+}
+
+function push(which, lag){
+  const s = stat[which];
+  s.n++;
+  s.lags.push(lag);
+  if(s.lags.length > 240) s.lags.shift();
+  const sorted = s.lags.slice().sort((a,b)=>a-b);
+  const pick = p => Math.round(sorted[Math.min(sorted.length-1, Math.floor(sorted.length*p))]);
+  document.getElementById('lag'+which).textContent = Math.round(lag) + ' ms';
+  document.getElementById('p50'+which).textContent = pick(0.5) + ' ms';
+  document.getElementById('p95'+which).textContent = pick(0.95) + ' ms';
+  document.getElementById('max'+which).textContent = Math.round(sorted[sorted.length-1]) + ' ms';
+  document.getElementById('n'+which).textContent = s.n;
+  const el = (performance.now() - s.t0) / 1000;
+  if(el > 0.6) document.getElementById('fps'+which).textContent = (s.n/el).toFixed(1);
+}
+
+async function run(which, mode){
+  const cv = document.getElementById(which === 'A' ? 'cvA' : 'cvB');
+  const res = await fetch('/cam.mjpg?mode=' + mode, { cache: 'no-store' });
+  const reader = res.body.getReader();
+  stat[which].t0 = performance.now();
+  while(true){
+    const { value, done } = await reader.read();
+    if(done) break;
+    buf[which] = concat(buf[which], value);
+    for(;;){
+      const f = take(buf[which]);
+      if(!f) break;
+      if(f.skip){ buf[which] = buf[which].subarray(f.skip); continue; }
+      buf[which] = buf[which].subarray(f.used);
+      const lag = Date.now() - f.ts;   // 采集时刻 → 现在（两边都必须用 epoch 毫秒）
+      try{
+        const bmp = await createImageBitmap(new Blob([f.jpeg], { type: 'image/jpeg' }));
+        paint(cv, bmp);
+        bmp.close && bmp.close();
+        push(which, lag);
+      }catch(e){}
+    }
+  }
+}
+
+run('A', 'old').catch(e => document.getElementById('lagA').innerHTML =
+  '<span class="err">' + e.message + '</span>');
+run('B', 'new').catch(e => document.getElementById('lagB').innerHTML =
+  '<span class="err">' + e.message + '</span>');
+</script>
+</body>
+</html>

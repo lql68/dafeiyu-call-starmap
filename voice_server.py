@@ -597,12 +597,20 @@ class Handler(SimpleHTTPRequestHandler):
                     continue
                 if data and data != last:
                     last = data
-                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                    # X-Ts = 这一帧落盘的时刻（epoch ms），页面据此算真实延迟；
+                    # 标准 multipart 允许额外 header，<img> 会忽略它。
+                    try:
+                        _ts = int(os.path.getmtime(LIVE) * 1000)
+                    except OSError:
+                        _ts = 0
+                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n"
+                                     b"X-Ts: " + str(_ts).encode()
+                                     + b"\r\nContent-Length: "
                                      + str(len(data)).encode() + b"\r\n\r\n")
                     self.wfile.write(data)
                     self.wfile.write(b"\r\n")
                     self.wfile.flush()
-                time.sleep(0.05)
+                time.sleep(0.008)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return
 
