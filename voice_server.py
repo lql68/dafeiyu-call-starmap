@@ -105,12 +105,22 @@ VISION_DIR = os.path.join(ROOT, "vision")
 CAM_FILE = os.path.join(VISION_DIR, "cam.txt")
 
 
-def list_cams():
-    """枚举 DirectShow 视频设备名。
+CAM_CACHE = {"t": 0.0, "v": None}
+
+
+def list_cams(force=False):
+    """枚举 DirectShow 视频设备名（结果缓存 60 秒）。
+
+    服务正忙着合成 TTS 的时候，起一个 ffmpeg 去枚举很容易踩 25 秒超时，
+    前端就显示「枚举失败」。设备列表几乎不会变，缓存住就行。
 
     直接扫 ffmpeg 的 `"名字" (video)` 行 —— 新版 ffmpeg 已经不打
     "DirectShow video devices" 这种标题行了，按标题分段会永远得到空列表。
     """
+    now = time.time()
+    if not force and CAM_CACHE["v"] is not None and now - CAM_CACHE["t"] < 60:
+        return list(CAM_CACHE["v"])
+
     try:
         r = subprocess.run(
             [FFMPEG_EXE, "-hide_banner", "-list_devices", "true",
@@ -120,7 +130,8 @@ def list_cams():
         out = (r.stderr or "") + (r.stdout or "")
     except Exception as e:
         log(f"[cams] 枚举失败 {e!r}")
-        return []
+        # 超时也别把已知列表清空
+        return list(CAM_CACHE["v"] or [])
 
     cams = []
     for line in out.splitlines():
@@ -130,6 +141,7 @@ def list_cams():
             if n not in cams:
                 cams.append(n)
     log(f"[cams] 找到 {len(cams)} 个视频设备: {cams}")
+    CAM_CACHE.update(t=now, v=list(cams))
     return cams
 
 

@@ -29,8 +29,13 @@
   /* ── 第一层：暖色房间（虚焦） ──────────────────────────── */
   .room{position:absolute;inset:0;overflow:hidden;background:
     linear-gradient(180deg,#4A3A28 0%,#382C1E 55%,#231B13 100%)}
-  /* 程序化画的房间（room.js）：书架/窗/台灯/地板，整体虚焦当背景 */
-  #roomCv{position:absolute;inset:0;width:100%;height:100%;
+  /* 背景：ComfyUI 出的书房（?bg=1|2|3 切换对比）；room.js 那张程序化图留作兜底 */
+  #roomBg{position:absolute;inset:0;background-size:cover;background-position:center;
+    background-image:url(bg/room1.png);
+    filter:blur(2.2px) saturate(.92) brightness(.80);
+    transform:scale(1.03);transform-origin:center}
+  /* 程序化房间：默认藏起来，?bg=canvas 时用 */
+  #roomCv{position:absolute;inset:0;width:100%;height:100%;display:none;
     filter:blur(4.5px) saturate(.94) brightness(.94);
     transform:scale(1.04);transform-origin:center}
   /* 书架：一排竖条，模糊掉 */
@@ -97,7 +102,7 @@
   .col{position:absolute;top:120px;bottom:104px;width:252px}
   .col.left{left:0;padding-left:48px;width:300px;border-right:1px solid var(--line);
        background:linear-gradient(90deg,rgba(11,15,21,.90) 0%,rgba(11,15,21,.70) 58%,rgba(11,15,21,0) 100%)}
-  .col.right{right:0;padding-right:48px;width:300px;top:326px;text-align:right;
+  .col.right{right:0;padding-right:48px;width:300px;top:392px;text-align:right;
        background:linear-gradient(270deg,rgba(11,15,21,.90) 0%,rgba(11,15,21,.70) 58%,rgba(11,15,21,0) 100%)}
   .row{position:relative;height:44px;padding-top:9px}
   .row em{display:block;font-style:normal;font-family:var(--mono);font-size:10.5px;
@@ -109,14 +114,28 @@
   .rule{height:1px;background:var(--line);margin:14px 0 18px}
 
   /* 识海球 */
-  .mind{position:absolute;right:44px;top:112px;width:186px;height:186px;
+  /* ── 记忆片段列表（左列下方） ────────────────────────── */
+  .frag{position:absolute;left:0;top:556px;width:300px;padding-bottom:14px;
+    background:linear-gradient(90deg,rgba(11,15,21,.90) 0%,rgba(11,15,21,.55) 64%,rgba(11,15,21,0) 100%)}
+  .frag h4{margin:0 0 9px;font-family:var(--mono);font-size:10px;font-weight:400;
+    letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3)}
+  .frag ul{margin:0;padding:0 0 0 11px;list-style:none}
+  .frag li{position:relative;padding-left:13px;margin-bottom:6px;
+    font-family:var(--sans);font-size:11px;line-height:1.62;color:var(--ink-2);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    opacity:0;animation:fragIn .9s forwards}
+  .frag li::before{content:"";position:absolute;left:0;top:.72em;width:6px;height:1px;
+    background:var(--warm);opacity:.55}
+  @keyframes fragIn{to{opacity:.92}}
+
+  .mind{position:absolute;right:48px;top:108px;width:250px;height:250px;
     border-radius:50%;
     background:radial-gradient(circle,rgba(8,12,18,.92) 0%,rgba(8,12,18,.72) 62%,rgba(8,12,18,.28) 88%,rgba(8,12,18,0) 100%)}
-  #mindCv{width:186px;height:186px;display:block}
+  #mindCv{width:250px;height:250px;display:block}
   .mind .ring{position:absolute;inset:0;border-radius:50%;
     border:1px solid var(--line)}
-  .mind .cap{position:absolute;left:0;right:0;bottom:9px;text-align:center;
-    font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--ink-2)}
+  .mind .cap{position:absolute;left:0;right:0;bottom:5px;text-align:center;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;color:var(--ink-2)}
   .mind .cap b{color:var(--ink-2);font-weight:400}
 
   /* 字幕（双语） */
@@ -209,6 +228,7 @@
 
   <!-- 暖色房间：全部由渐变+模糊堆出来，等 ComfyUI 出真图再替换 -->
   <div class="room">
+    <div id="roomBg"></div>
     <canvas id="roomCv"></canvas>
     <div class="shelf"></div>
     <div class="window"></div>
@@ -236,6 +256,12 @@
 
     <div class="col left" id="colL"></div>
 
+    <!-- 真实记忆片段：node_value 直接来自 livingmemory 的知识图谱 -->
+    <div class="frag" id="frag">
+      <h4>Memory fragments</h4>
+      <ul id="fragList"><li>正在读她的记忆…</li></ul>
+    </div>
+
     <div class="col right">
       <div class="row warm"><em>Emotion mapping</em><b id="rEmo">平静</b></div>
       <div class="row"><em>Smile / eyes</em><b><span id="rSmile">0%</span> · <span id="rEye">—</span></b></div>
@@ -247,7 +273,7 @@
     </div>
 
     <div class="mind">
-      <canvas id="mindCv" width="432" height="432"></canvas>
+      <canvas id="mindCv" width="500" height="500"></canvas>
       <div class="ring"></div>
       <div class="cap">记忆节点 <b id="mNode">1335</b> · 连线 <b id="mEdge">5278</b></div>
     </div>
@@ -474,6 +500,31 @@ function renderClock(){
       if(m.docs_all) mem.docs = m.docs_all;
       if(m.atoms_all) mem.atoms = m.atoms_all;
       if(m.avg_importance != null) mem.strength = Math.round(m.avg_importance * 100);
+      /* 记忆片段：优先拿度数高的（她最在意的事），每 6 秒换一批 */
+      const pool = pts.filter(n => n.v && n.v.length > 3).map(n => ({d: n.d || 1, v: n.v}));
+      pool.sort((a, b) => b.d - a.d);
+      const hot = pool.slice(0, 240);
+      const showFrag = () => {
+        const ul = document.getElementById('fragList');
+        if(!ul) return;
+        ul.textContent = '';
+        const picks = [];
+        const used = new Set();
+        while(picks.length < 6 && picks.length < hot.length){
+          const k = (Math.random() * hot.length) | 0;
+          if(used.has(k)) continue;
+          used.add(k);
+          picks.push(hot[k]);
+        }
+        picks.forEach((it, i) => {
+          const li = document.createElement('li');
+          li.textContent = it.v;
+          li.style.animationDelay = (i * 90) + 'ms';
+          ul.appendChild(li);
+        });
+      };
+      showFrag();
+      setInterval(showFrag, 6000);
       console.log('[mind] 真实图谱 ' + pts.length + ' 点 / ' + links.length + ' 边' +
                   '（库内 ' + m.nodes_all + ' 点 / ' + m.edges_all + ' 边）');
     }catch(e){
@@ -647,6 +698,21 @@ document.getElementById('cams').addEventListener('change', async e => {
   }catch(err){}
 });
 loadCams();
+
+/* 背景选择：?bg=1|2|3 换图，?bg=canvas 用程序化那间房 */
+(function pickBg(){
+  const q = (location.search.match(/[?&]bg=([^&]+)/) || [])[1] || '1';
+  const el = document.getElementById('roomBg');
+  const cv = document.getElementById('roomCv');
+  if(q === 'canvas'){
+    if(el) el.style.display = 'none';
+    if(cv) cv.style.display = 'block';
+    return;
+  }
+  const n = ['1', '2', '3'].includes(q) ? q : '1';
+  if(el) el.style.backgroundImage = 'url(bg/room' + n + '.png)';
+  if(cv) cv.style.display = 'none';
+})();
 
 setInterval(poll, 1200); poll();
 setInterval(tick, 500); tick();
