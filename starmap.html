@@ -106,6 +106,8 @@
   var PX, PY, PS, PZ;         // 每帧投影缓存
   var adj = [];               // 邻接表：选中时用
   var LAYER = [];             // 每个节点属于哪一层
+  var DENS  = null;           // 每个节点的半径系数（球壳厚度）
+  var CLUSTER = null;         // 每个节点的方位密度（0.2 空洞 ~ 1.0 星系团）
   var hover = -1, picked = -1;
   var yaw = 0, pitch = -0.18, yawVel = 0.00030;
   var parallax = 0, parallaxY = 0;
@@ -122,7 +124,7 @@
     cv.height = Math.round(H * DPR);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     CX = W * 0.5; CY = H * 0.5;
-    R  = Math.min(W, H) * 0.40;
+    R = Math.min(W, H) * 0.430;
   }
 
   function load(){
@@ -149,7 +151,40 @@
           if(a < n && b < n){ adj[a].push(b); adj[b].push(a); }
         }
         LAYER = new Array(n);
-        for(var q = 0; q < n; q++) LAYER[q] = layerOf(NODES[q]);
+        DENS  = new Float32Array(n);
+        for(var q = 0; q < n; q++){
+          LAYER[q] = layerOf(NODES[q]);
+          /* 确定性伪随机（sin 哈希）：让点不在同一层球壳上，
+             有的挤成一团有的落到外圈 —— 宇宙才不是均匀撒的 */
+          var hh = Math.sin((q + 1) * 127.1) * 43758.5453;
+          var fr = hh - Math.floor(hh);
+          DENS[q] = 0.54 + Math.pow(fr, 1.6) * 0.62;
+        }
+
+        /* 方位密度：球面上放 5 个"星系团"方向，靠近它们的点又亮又密，
+           中间自然留出空洞 —— 均匀撒点的球看着像毛线团，不像宇宙 */
+        var CL = [
+          [ 0.86,  0.26,  0.44],   // 右上
+          [-0.82,  0.30,  0.49],   // 左上
+          [ 0.58, -0.66,  0.48],   // 右下
+          [-0.54, -0.72, -0.44],   // 左下
+          [ 0.04,  0.94, -0.34],   // 顶
+          [ 0.10, -0.96,  0.26]    // 底
+        ];
+        CLUSTER = new Float32Array(n);
+        for(var q2 = 0; q2 < n; q2++){
+          var nd2 = NODES[q2];
+          var vx2 = nd2.x, vy2 = nd2.y, vz2 = nd2.z;
+          var vlen2 = Math.sqrt(vx2*vx2 + vy2*vy2 + vz2*vz2) || 1;
+          var best = 9;
+          for(var ci = 0; ci < CL.length; ci++){
+            var dot = (vx2*CL[ci][0] + vy2*CL[ci][1] + vz2*CL[ci][2]) / vlen2;
+            var ang = Math.acos(Math.max(-1, Math.min(1, dot)));
+            if(ang < best) best = ang;
+          }
+          var tt = Math.max(0, 1 - best / 1.05);
+          CLUSTER[q2] = 0.16 + 0.84 * Math.pow(tt, 1.18);
+        }
 
         var m = d.meta || {};
         hn.textContent = n;
@@ -174,11 +209,11 @@
     var p = rotate(nd.x, nd.y, nd.z);
     var dz = p[2];
     var s = FOV / (FOV + dz);
-    var sc = R * s;
+    var sc = R * s * zoom * (DENS ? DENS[i] : 1);
     PZ[i] = dz;
     PS[i] = s;
-    PX[i] = CX + p[0] * sc + parallax  * sc * 26;
-    PY[i] = CY + p[1] * sc + parallaxY * sc * 26;
+    PX[i] = CX + p[0] * sc;
+    PY[i] = CY + p[1] * sc;
   }
 
   function frame(t){
@@ -195,6 +230,7 @@
     ctx.fillStyle = '#05070C';
     ctx.fillRect(0, 0, W, H);
 
+
     /* ── 星云层：话题节点周围铺大而淡的暖色团，先用它做出"云雾底" ── */
     for(var nb = 0; nb < NODES.length; nb++){
       if(LAYER[nb] !== 'nebula') continue;
@@ -203,14 +239,23 @@
       var nr = (26 + Math.log2(1 + ndn.d) * 13) * PS[nb];
       var na = 0.090 * Math.max(0.25, PS[nb]);
       if(focusSet && focusSet.indexOf(nb) < 0) na *= 0.3;
-      var grd = ctx.createRadialGradient(PX[nb], PY[nb], 0, PX[nb], PY[nb], nr);
-      grd.addColorStop(0, 'rgba(232,212,174,' + na.toFixed(3) + ')');
-      grd.addColorStop(0.55, 'rgba(206,182,148,' + (na * 0.45).toFixed(3) + ')');
-      grd.addColorStop(1, 'rgba(180,160,130,0)');
+      /* 拉成竖直的气体柱，朝向按索引微抖 —— 一团团圆饼看不出"柱" */
+      var ang0 = ((nb * 137) % 360) * Math.PI / 180;
+      var stretch = 1.55 + ((nb * 71) % 100) / 100 * 0.75;
+      ctx.save();
+      ctx.translate(PX[nb], PY[nb]);
+      ctx.rotate(ang0 * 0.12);
+      ctx.scale(1 / Math.sqrt(stretch), stretch / Math.sqrt(stretch));
+      var grd = ctx.createRadialGradient(0, 0, 0, 0, 0, nr);
+      grd.addColorStop(0, 'rgba(236,220,186,' + na.toFixed(3) + ')');
+      grd.addColorStop(0.42, 'rgba(214,186,146,' + (na * 0.52).toFixed(3) + ')');
+      grd.addColorStop(0.75, 'rgba(178,140,104,' + (na * 0.20).toFixed(3) + ')');
+      grd.addColorStop(1, 'rgba(150,120,90,0)');
       ctx.fillStyle = grd;
       ctx.beginPath();
-      ctx.arc(PX[nb], PY[nb], nr, 0, 6.2832);
+      ctx.arc(0, 0, nr, 0, 6.2832);
       ctx.fill();
+      ctx.restore();
     }
 
     /* 线：按深度分档，每档一次 beginPath */
@@ -303,9 +348,10 @@
 
       /* 尘埃：小、暗、密 —— 不抢戏，但铺出"体积感" */
       if(lay === 'dust'){
-        var rr0 = (0.5 + Math.log2(1 + deg) * 0.16) * s2;
+        var rr0 = (0.62 + Math.log2(1 + deg) * 0.20) * s2 * (0.72 + 0.40 * (CLUSTER ? CLUSTER[idx] : 1));
         if(rr0 < 0.28) rr0 = 0.28;
-        var a0 = Math.min(0.78, (0.42 + Math.max(0, 1 - Math.min(1, (nd.a || 0) / 8)) * 0.24) * dim);
+        var cw = CLUSTER ? CLUSTER[idx] : 1;
+        var a0 = Math.min(0.95, (0.58 + Math.max(0, 1 - Math.min(1, (nd.a || 0) / 8)) * 0.26) * dim * (0.30 + 0.70 * cw));
         ctx.globalAlpha = a0;
         ctx.fillStyle = 'rgba(' + LAYER_COLOR.dust + ',1)';
         ctx.beginPath();
@@ -327,10 +373,10 @@
       }
 
       /* 恒星 / 人：大光晕 + 星芒 */
-      var rr2 = (1.2 + Math.log2(1 + deg) * 0.42) * s2;
+      var rr2 = (1.45 + Math.log2(1 + deg) * 0.48) * s2;
       if(rr2 < 0.7) rr2 = 0.7;
       var fresh = Math.max(0, 1 - Math.min(1, (nd.a || 0) / 8)) * 0.30;
-      var a2 = Math.min(1, (0.66 + fresh) * dim * (0.6 + s2 * 0.5));
+      var a2 = Math.min(1, (0.92 + fresh) * dim * (0.7 + s2 * 0.4));
       var sp2 = (nd.k === 'person') ? SPRITE.person : SPRITE.star;
       var d2 = rr2 * 7.0;
       ctx.globalAlpha = a2;
@@ -348,35 +394,95 @@
       }
     }
 
-    /* ── 黑洞最后画，压在所有东西上面：黑盘 + 冷蓝吸积环 ── */
+    /* ── 枢纽（度数≥100）：画成最烫的橙白亮斑，压在其它层之上
+       中央那个巨黑洞是唯一的黑洞，这些枢纽挂在它周围的球面上当"环上最亮的星" ── */
     for(var h = 0; h < NODES.length; h++){
       if(LAYER[h] !== 'hole') continue;
-      var ndh = NODES[h];
-      var rh = (5.5 + Math.log2(1 + (ndh.d || 0)) * 1.5) * PS[h];
-      var dimh = (focusSet && focusSet.indexOf(h) < 0) ? 0.35 : 1.0;
+      var rh = (2.6 + Math.log2(1 + (NODES[h].d || 0)) * 0.8) * PS[h];
+      var dimh = (focusSet && focusSet.indexOf(h) < 0) ? 0.34 : 1.0;
 
-      /* 外圈引力光晕 */
-      var gh = ctx.createRadialGradient(PX[h], PY[h], rh, PX[h], PY[h], rh * 2.6);
-      gh.addColorStop(0, 'rgba(120,180,255,' + (0.16 * dimh).toFixed(3) + ')');
-      gh.addColorStop(1, 'rgba(120,180,255,0)');
+      var gh = ctx.createRadialGradient(PX[h], PY[h], 0, PX[h], PY[h], rh * 4.2);
+      gh.addColorStop(0.00, 'rgba(255,242,214,' + (0.95 * dimh).toFixed(3) + ')');
+      gh.addColorStop(0.35, 'rgba(255,178,104,' + (0.52 * dimh).toFixed(3) + ')');
+      gh.addColorStop(1.00, 'rgba(230,120,60,0)');
       ctx.fillStyle = gh;
       ctx.beginPath();
-      ctx.arc(PX[h], PY[h], rh * 2.6, 0, 6.2832);
+      ctx.arc(PX[h], PY[h], rh * 4.2, 0, 6.2832);
       ctx.fill();
 
-      /* 黑盘 */
       ctx.beginPath();
-      ctx.arc(PX[h], PY[h], rh, 0, 6.2832);
-      ctx.fillStyle = 'rgba(0,0,0,' + (0.92 * dimh).toFixed(3) + ')';
+      ctx.arc(PX[h], PY[h], rh * 0.62, 0, 6.2832);
+      ctx.fillStyle = 'rgba(255,255,252,' + (0.96 * dimh).toFixed(3) + ')';
       ctx.fill();
 
-      /* 吸积环 */
+      /* 四芒 */
+      var l4 = rh * 6.5;
       ctx.beginPath();
-      ctx.arc(PX[h], PY[h], rh * 1.22, 0, 6.2832);
-      ctx.strokeStyle = 'rgba(150,200,255,' + (0.62 * dimh).toFixed(3) + ')';
-      ctx.lineWidth = 1.3;
+      ctx.moveTo(PX[h] - l4, PY[h]); ctx.lineTo(PX[h] + l4, PY[h]);
+      ctx.moveTo(PX[h], PY[h] - l4); ctx.lineTo(PX[h], PY[h] + l4);
+      ctx.strokeStyle = 'rgba(255,226,178,' + (0.30 * dimh).toFixed(3) + ')';
+      ctx.lineWidth = 0.9;
       ctx.stroke();
     }
+
+    /* ══ 中央黑洞（参照 M87）══
+       这是整个界面的视觉锚点：一片橙红的吸积盘环 + 中间纯黑的暗影。
+       环是不对称的 —— M87 里朝向我们的一侧被相对论性集束打亮，所以下半圈更白。
+       它不参与图数据，纯装饰，任何节点都不会画在这上面。 */
+    (function(){
+      var rr = Math.min(W, H) * 0.062 * (0.62 + 0.38 * Math.min(1.6, zoom));
+      var tilt = -0.42;                       /* 盘面倾角，让它看着是"斜着看一个盘" */
+
+      /* 外层引力辉光 */
+      var g0 = ctx.createRadialGradient(CX, CY, rr * 1.1, CX, CY, rr * 4.2);
+      g0.addColorStop(0.00, 'rgba(255,150,80,0.10)');
+      g0.addColorStop(0.35, 'rgba(230,120,60,0.045)');
+      g0.addColorStop(1.00, 'rgba(180,90,50,0)');
+      ctx.fillStyle = g0;
+      ctx.beginPath(); ctx.arc(CX, CY, rr * 4.2, 0, 6.2832); ctx.fill();
+
+      ctx.save();
+      ctx.translate(CX, CY);
+      ctx.rotate(tilt);
+      ctx.scale(1, 0.82);                     /* M87 视角接近正面，只轻微压扁 */
+
+      /* 盘：外层暗橙 → 内层白热 */
+      var ringR = rr * 1.10;
+      var g1 = ctx.createRadialGradient(0, 0, ringR * 0.62, 0, 0, ringR * 1.20);
+      g1.addColorStop(0.00, 'rgba(255,246,232,0)');
+      g1.addColorStop(0.42, 'rgba(255,232,196,0.85)');
+      g1.addColorStop(0.62, 'rgba(255,168,96,0.72)');
+      g1.addColorStop(0.86, 'rgba(196,92,44,0.34)');
+      g1.addColorStop(1.00, 'rgba(150,64,30,0)');
+      ctx.strokeStyle = g1;
+      ctx.lineWidth = rr * 0.34;
+      ctx.beginPath(); ctx.arc(0, 0, ringR, 0, 6.2832); ctx.stroke();
+
+      /* 朝向我们的那一侧（下半圈）亮度再加一档 */
+      ctx.beginPath();
+      ctx.arc(0, 0, ringR, 0.06 * Math.PI, 0.96 * Math.PI);
+      ctx.strokeStyle = 'rgba(255,250,240,0.55)';
+      ctx.lineWidth = rr * 0.30;
+      ctx.stroke();
+
+      /* 细锐的光子环 */
+      ctx.beginPath();
+      ctx.arc(0, 0, ringR * 0.84, 0, 6.2832);
+      ctx.strokeStyle = 'rgba(255,214,168,0.50)';
+      ctx.lineWidth = Math.max(0.8, rr * 0.045);
+      ctx.stroke();
+      ctx.restore();
+
+      /* 事件视界：纯黑暗影，压住环的内侧 */
+      ctx.beginPath(); ctx.arc(CX, CY, rr * 0.88, 0, 6.2832);
+      ctx.fillStyle = '#000';
+      ctx.fill();
+      var g2 = ctx.createRadialGradient(CX, CY, rr * 0.86, CX, CY, rr * 1.02);
+      g2.addColorStop(0, 'rgba(0,0,0,0.96)');
+      g2.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g2;
+      ctx.beginPath(); ctx.arc(CX, CY, rr * 1.02, 0, 6.2832); ctx.fill();
+    })();
 
     /* 悬停环 */
     if(hover >= 0 && hover !== picked){
@@ -405,6 +511,13 @@
 
   /* ── 交互 ───────────────────────────────── */
   var dragging = false, lastX = 0, lastY = 0;
+  var zoom = 1.0;              /* 滚轮缩放 */
+
+  cv.addEventListener('wheel', function(e){
+    e.preventDefault();
+    zoom *= (e.deltaY > 0) ? 0.92 : 1.085;
+    zoom = Math.max(0.32, Math.min(3.2, zoom));
+  }, { passive:false });
 
   cv.addEventListener('pointerdown', function(e){
     dragging = true; lastX = e.clientX; lastY = e.clientY;
@@ -423,10 +536,6 @@
       pitch = Math.max(-1.2, Math.min(1.2, pitch));
       lastX = mx; lastY = my;
     }
-
-    /* 视差：鼠标位置轻微推近 */
-    parallax  += ((mx / W - 0.5) * 2 - parallax)  * 0.06;
-    parallaxY += ((my / H - 0.5) * 2 - parallaxY) * 0.06;
 
     /* 命中测试 */
     var best = -1, bestD = 15 * 15;
