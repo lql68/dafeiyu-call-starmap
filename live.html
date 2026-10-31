@@ -443,7 +443,7 @@
     background:radial-gradient(circle,rgba(8,12,18,.92) 0%,rgba(8,12,18,.72) 62%,rgba(8,12,18,.28) 88%,rgba(8,12,18,0) 100%)}
   #mindCv{width:250px;height:250px;display:block}
   .mind{cursor:pointer;transition:transform .22s, box-shadow .22s}
-  .mind.zoom{transform:scale(9);opacity:0;
+  .mind.zoom{pointer-events:none;transform:scale(9);opacity:0;
     transition:transform .55s cubic-bezier(.38,0,.24,1), opacity .45s ease-in}
 .mind:hover{transform:scale(1.03);
     box-shadow:0 0 0 1px rgba(217,200,166,.35), 0 0 34px rgba(217,200,166,.14)}
@@ -1776,6 +1776,18 @@ function renderClock(){
   function openStar(){
     if(starOpen || !starFull) return;
     starOpen = true;
+
+    /* 关键：/cam.mjpg 是不会结束的 MJPEG 流，一个连接被它长期占着；
+       浏览器对同一域名只给 6 个并发连接，星图 iframe 的请求就会一直排队，
+       表现就是"点了球以后页面卡住没反应"。星图铺满时摄像头本来就看不见，
+       先把连接断掉，关掉星图再挂回去。 */
+    const ci = document.getElementById('camImg');
+    if(ci && ci.getAttribute('src')){
+      window.__camSrc = ci.getAttribute('src');
+      ci.removeAttribute('src');
+      console.log('[mind] 已让出摄像头连接');
+    }
+
     const box = cv.closest('.mind');
     if(box) box.classList.add('zoom');                 /* 球放大并淡出，当转场 */
     try{ if(window.__l2d && window.__l2d.app) window.__l2d.app.stop(); }catch(e){}
@@ -1789,6 +1801,14 @@ function renderClock(){
   function closeStar(){
     if(!starOpen || !starFull) return;
     starOpen = false;
+
+    /* 把摄像头连接挂回去 */
+    const ci2 = document.getElementById('camImg');
+    if(ci2 && !ci2.getAttribute('src') && window.__camSrc){
+      ci2.setAttribute('src', window.__camSrc + '?t=' + Date.now());
+      window.__camSrc = '';
+      console.log('[mind] 摄像头已恢复');
+    }
     starFull.classList.remove('on');
     starFull.setAttribute('aria-hidden', 'true');
     try{ if(window.__l2d && window.__l2d.app) window.__l2d.app.start(); }catch(e){}
