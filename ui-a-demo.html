@@ -29,9 +29,13 @@
   /* ── 第一层：暖色房间（虚焦） ──────────────────────────── */
   .room{position:absolute;inset:0;overflow:hidden;background:
     linear-gradient(180deg,#4A3A28 0%,#382C1E 55%,#231B13 100%)}
+  /* 程序化画的房间（room.js）：书架/窗/台灯/地板，整体虚焦当背景 */
+  #roomCv{position:absolute;inset:0;width:100%;height:100%;
+    filter:blur(4.5px) saturate(.94) brightness(.94);
+    transform:scale(1.04);transform-origin:center}
   /* 书架：一排竖条，模糊掉 */
   .shelf{position:absolute;left:-40px;right:-40px;top:120px;height:760px;
-    filter:blur(26px);opacity:.85;
+    filter:blur(30px);opacity:.30;
     background:
       repeating-linear-gradient(90deg,
         #6B5238 0 54px, #4A3A28 54px 62px,
@@ -40,12 +44,12 @@
   }
   /* 右上窗光：一大团暖光 */
   .window{position:absolute;right:-160px;top:-220px;width:1200px;height:1000px;
-    filter:blur(86px);opacity:.95;
+    filter:blur(96px);opacity:.55;
     background:radial-gradient(ellipse at 62% 34%,
       #F3E4C4 0%, #E0C99E 26%, rgba(190,160,110,.55) 52%, rgba(120,96,64,0) 78%)}
   /* 左下地板反光 */
   .floor{position:absolute;left:-100px;bottom:-160px;width:1400px;height:620px;
-    filter:blur(66px);opacity:.72;
+    filter:blur(74px);opacity:.42;
     background:radial-gradient(ellipse at 40% 60%,
       rgba(196,150,96,.5) 0%, rgba(120,88,54,.28) 46%, rgba(0,0,0,0) 76%)}
   /* 前景一根书架边缘（压暗，制造景深） */
@@ -205,6 +209,7 @@
 
   <!-- 暖色房间：全部由渐变+模糊堆出来，等 ComfyUI 出真图再替换 -->
   <div class="room">
+    <canvas id="roomCv"></canvas>
     <div class="shelf"></div>
     <div class="window"></div>
     <div class="floor"></div>
@@ -277,7 +282,7 @@
       <div class="bars">
         <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
         <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-        <span class="t">Active memory <b id="mRatio">69%</b></span>
+        <span class="t">Memory strength <b id="mRatio">—</b></span>
       </div>
     </div>
 
@@ -357,61 +362,126 @@ function renderClock(){
     .replace(/\//g, ' · ');
 }
 
-/* ── 识海：1335 个节点 + 5278 条连线 ──────────────────── */
+/* ── 识海：直接画 livingmemory 的真实知识图谱 ──────────────
+   数据由 gen_memory_graph.py 从 livingmemory.db 导出：
+     graph_nodes 里取度数最高的 900 个实体，沿 graph_edges 的真实边
+     做过 6 轮「弹簧 + 回归球面」，所以有关系的记忆会自己聚成团。
+   点的颜色 = 节点类型，大小 = 度数（log），亮度 = 深度 + 新近度。 */
 (function mind(){
   const cv = document.getElementById('mindCv');
+  if(!cv) return;
   const cx = cv.getContext('2d');
   const W = cv.width, H = cv.height, C = W / 2, R = W / 2 - 8;
 
-  /* 球面均匀取点，再投到 2D（看起来像一团星云） */
-  const pts = [];
-  const N = mem.nodes;
-  for(let i = 0; i < N; i++){
-    const u = Math.random() * 2 - 1;
-    const th = Math.random() * Math.PI * 2;
-    const r = Math.sqrt(1 - u * u);
-    pts.push([r * Math.cos(th), u, r * Math.sin(th), 0.35 + Math.random() * 0.65]);
+  let pts = null, links = null;
+
+  /* 读不到真实图谱时退回占位星云，别开天窗 */
+  function fallback(){
+    pts = [];
+    for(let i = 0; i < 900; i++){
+      const u = Math.random() * 2 - 1, th = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(1 - u * u);
+      pts.push({x: r*Math.cos(th), y: u, z: r*Math.sin(th), d: 1, t: 6, a: 60, r: 1});
+    }
+    links = [];
+    for(let i = 0; i < 3800; i++){
+      const a = (Math.random()*900)|0, b = (Math.random()*900)|0;
+      if(a !== b) links.push([a, b, 0.5]);
+    }
   }
-  /* 连线：每个节点连 3~5 条，总条数贴着 5278 */
-  const links = [];
-  const targets = mem.edges;
-  while(links.length < targets){
-    const a = (Math.random() * N) | 0;
-    const b = (Math.random() * N) | 0;
-    if(a !== b) links.push([a, b]);
-  }
+
+  const TONE = [
+    [232, 212, 174],   // topic        暖
+    [206, 220, 234],   // fact         冷
+    [176, 186, 200],   // entity
+    [214, 190, 168],   // event
+    [198, 206, 222],   // person
+    [226, 216, 198],   // preference
+    [148, 156, 170],   // other
+  ];
 
   let ang = 0;
-  function draw(){
-    ang += 0.0022;
-    cx.clearRect(0, 0, W, H);
-    const cos = Math.cos(ang), sin = Math.sin(ang);
-    const proj = pts.map(p => {
-      const x = p[0] * cos - p[2] * sin;
-      const z = p[0] * sin + p[2] * cos;
-      const k = 1 / (2.4 - z * 0.9);
-      return [C + x * R * 1.75 * k, C + p[1] * R * 1.75 * k, z, p[3]];
-    });
 
-    cx.lineWidth = 1.4;
-    for(const [a, b] of links){
-      const A = proj[a], B = proj[b];
-      if(A[2] < -0.55 || B[2] < -0.55) continue;      // 背面不画
-      const al = 0.03 + Math.max(0, (A[2] + B[2]) / 2) * 0.16;
-      cx.strokeStyle = 'rgba(158,178,198,' + (al * 1.6).toFixed(3) + ')';
-      cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.stroke();
+  function draw(){
+    if(!pts){ requestAnimationFrame(draw); return; }
+    ang += 0.0022;
+    const cos = Math.cos(ang), sin = Math.sin(ang);
+    const n = pts.length;
+    const px = new Float32Array(n), py = new Float32Array(n), pz = new Float32Array(n);
+
+    for(let i = 0; i < n; i++){
+      const p = pts[i];
+      const rr = p.r == null ? 1 : p.r;        // 度数层：核心小半径、外围大半径
+      const x = p.x * cos - p.z * sin;
+      const z = p.x * sin + p.z * cos;
+      const k = 1 / (2.4 - z * 0.9);
+      px[i] = C + x * R * 1.75 * k;
+      py[i] = C + p.y * R * 1.75 * k;
+      pz[i] = z * rr;
     }
-    for(const P of proj){
-      if(P[2] < -0.7) continue;
-      const r = (0.9 + P[3] * 1.5) * (0.6 + (P[2] + 1) * 0.5);
-      const a = 0.22 + (P[2] + 1) * 0.36;
-      cx.fillStyle = (P[3] > 0.82)
-        ? 'rgba(232,212,174,' + Math.min(1, a * 1.5).toFixed(3) + ')'
-        : 'rgba(206,220,234,' + Math.min(1, a * 1.25).toFixed(3) + ')';
-      cx.beginPath(); cx.arc(P[0], P[1], r * 0.86, 0, 6.284); cx.fill();
+    cx.clearRect(0, 0, W, H);
+
+    /* 边：按平均深度分三档，每档一次 beginPath 批量描，省掉几千次状态切换 */
+    const bands = [[], [], []];
+    for(let i = 0; i < links.length; i++){
+      const a = links[i][0], b = links[i][1];
+      if(pz[a] < -0.5 && pz[b] < -0.5) continue;      // 背面整条不画
+      const zm = (pz[a] + pz[b]) * 0.5;
+      bands[zm < -0.1 ? 0 : (zm < 0.45 ? 1 : 2)].push(a, b);
+    }
+    const ALPHA = [0.05, 0.10, 0.17];
+    cx.lineWidth = 1.2;
+    for(let bi = 0; bi < 3; bi++){
+      const arr = bands[bi];
+      if(!arr.length) continue;
+      cx.strokeStyle = 'rgba(158,178,198,' + ALPHA[bi] + ')';
+      cx.beginPath();
+      for(let i = 0; i < arr.length; i += 2){
+        cx.moveTo(px[arr[i]], py[arr[i]]);
+        cx.lineTo(px[arr[i + 1]], py[arr[i + 1]]);
+      }
+      cx.stroke();
+    }
+
+    /* 点 */
+    for(let i = 0; i < n; i++){
+      if(pz[i] < -0.7) continue;
+      const p = pts[i];
+      const deg = p.d || 1;
+      const r = (0.72 + Math.log2(1 + deg) * 0.44) * (0.62 + (pz[i] + 1) * 0.46);
+      const fresh = 1 - Math.min(1, (p.a == null ? 60 : p.a) / 240);  // 越新越亮
+      const a = (0.20 + (pz[i] + 1) * 0.34) * (0.70 + fresh * 0.45);
+      const tone = TONE[p.t] || TONE[6];
+      cx.fillStyle = 'rgba(' + tone[0] + ',' + tone[1] + ',' + tone[2] + ',' +
+                     Math.min(1, a).toFixed(3) + ')';
+      cx.beginPath(); cx.arc(px[i], py[i], r, 0, 6.284); cx.fill();
     }
     requestAnimationFrame(draw);
   }
+
+  (async function load(){
+    try{
+      const j = await (await fetch('memory-graph.json?t=' + Date.now(),
+                                   {cache: 'no-store'})).json();
+      if(!j.nodes || !j.nodes.length) throw new Error('图谱是空的');
+      pts = j.nodes;
+      links = j.links || [];
+      const m = j.meta || {};
+      /* 灌进 mem，tick 里写 HUD 的那几个数字就自动变真实值了
+         （原来 tick 每 500ms 把写死值覆盖回去，所以这里设了也白设） */
+      if(m.nodes_all) mem.nodes = m.nodes_all;
+      if(m.edges_all) mem.edges = m.edges_all;
+      if(m.docs_all) mem.docs = m.docs_all;
+      if(m.atoms_all) mem.atoms = m.atoms_all;
+      if(m.avg_importance != null) mem.strength = Math.round(m.avg_importance * 100);
+      console.log('[mind] 真实图谱 ' + pts.length + ' 点 / ' + links.length + ' 边' +
+                  '（库内 ' + m.nodes_all + ' 点 / ' + m.edges_all + ' 边）');
+    }catch(e){
+      console.warn('[mind] 真实图谱读不到，退回占位星云：' + e.message);
+      fallback();
+    }
+  })();
+
   draw();
 })();
 
@@ -449,7 +519,10 @@ function tick(){
   document.getElementById('rFps').textContent = S.fps == null ? '—' : S.fps.toFixed(1);
   document.getElementById('mNode').textContent = mem.nodes;
   document.getElementById('mEdge').textContent = mem.edges;
-  document.getElementById('mRatio').textContent = Math.round(mem.atoms / (mem.nodes * 0.9) * 100) + '%';
+  document.getElementById('mRatio').textContent =
+    (mem.strength != null ? mem.strength : '—') + '%';
+  const td = document.getElementById('tDocs');
+  if(td) td.textContent = mem.docs + ' docs';
 }
 
 
@@ -579,5 +652,6 @@ setInterval(poll, 1200); poll();
 setInterval(tick, 500); tick();
 setInterval(renderClock, 1000); renderClock();
 </script>
+<script src="room.js"></script>
 </body>
 </html>
