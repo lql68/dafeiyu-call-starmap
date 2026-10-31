@@ -531,6 +531,16 @@
         color:var(--ink-2);padding:2px 6px}
   .talk button:hover{color:var(--warm-hi)}
   .talk button:hover{color:var(--warm-hi)}
+  .camsw{padding:5px 10px;border-radius:4px;cursor:pointer;font-size:11.5px;
+    white-space:nowrap;flex-shrink:0;font-family:var(--mono);letter-spacing:0;
+    border:1px solid rgba(140,160,190,.34);background:rgba(10,14,20,.5);color:#7f8b9b;
+    transition:color .16s,border-color .16s,background .16s}
+  .camsw:hover{border-color:rgba(200,190,160,.55)}
+  .camsw.on{color:#d9c8a6;border-color:rgba(200,190,160,.55);background:rgba(60,48,30,.42)}
+  .camoff{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;color:#6d7787;
+    background:rgba(6,9,14,.92);z-index:2}
+  .camon .camoff{display:flex}
   .camsel{display:flex;align-items:center;gap:8px;
         border-left:1px solid var(--line);padding-left:14px}
   .camsel em{font-style:normal;font-family:var(--mono);font-size:11px;
@@ -693,6 +703,7 @@
           <button id="chatSend">SEND</button>
         </div>
         <div class="camsel">
+          <button class="camsw on" id="camSw" title="开 / 关摄像头">◉ 摄像头</button>
           <em>Cam</em>
           <select id="cams"><option>加载中…</option></select>
         </div>
@@ -707,7 +718,7 @@
       </div>
       <div class="camwin">
         <span>CAM 01</span><i class="dot"></i>
-        <img id="camImg" src="/cam.mjpg" alt="">
+        <div class="camoff" id="camOff">摄像头已关闭</div><img id="camImg" src="/cam.mjpg" alt="">
       </div>
       <div class="bars">
         <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
@@ -2305,6 +2316,43 @@ document.getElementById('cams').addEventListener('change', async e => {
   }catch(err){}
 });
 loadCams();
+
+/* ── 摄像头开关 ─────────────────────────────────────────────
+   关的时候不只是"画面看不见"：
+     · 前端把 <img> 的 src 摘掉 → MJPEG 那条永不结束的连接释放
+     · 后端 cam.txt 写 __off__ → vision.py 不起 ffmpeg，摄像头指示灯灭 */
+(function(){
+  var img = document.getElementById('camImg');
+  var sw  = document.getElementById('camSw');
+  if(!img || !sw) return;
+  var last = 'HD webcam', off = false;
+  function wrap(){ return img.closest('.cam') || img.parentElement; }
+  async function post(name){
+    try{
+      await fetch('/api/cam', { method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name: name }) });
+    }catch(e){}
+  }
+  sw.addEventListener('click', async function(){
+    var sel = document.getElementById('cams');
+    off = !off;
+    if(off){
+      last = (sel && sel.value) || last;
+      await post('__off__');
+      img.removeAttribute('src');
+      wrap().classList.add('camon');
+      sw.classList.remove('on');
+      sw.textContent = '○ 已关闭';
+    }else{
+      await post(last || 'HD webcam');
+      img.src = '/cam.mjpg?t=' + Date.now();
+      wrap().classList.remove('camon');
+      sw.classList.add('on');
+      sw.textContent = '◉ 摄像头';
+    }
+  });
+})();
 
 /* 背景选择：?bg=1|2|3 换图，?bg=canvas 用程序化那间房 */
 (function pickBg(){

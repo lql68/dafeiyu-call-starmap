@@ -39,6 +39,8 @@ YIELD = os.path.join(HERE, "yield.lock")   # 其他进程要独占摄像头时�
 
 FFMPEG = r"C:\Users\liu\bin\ffmpeg.exe"
 VIDEO_DEV = "video=HD webcam"
+OFF_DEV = "__off__"   # cam.txt 写这个 = 用户把摄像头关了
+OFF_LOGGED = [False]
 
 # 摄像头可以在网页上换：写一行设备名到这里，采到下一帧就重连
 CAM_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cam.txt")
@@ -124,6 +126,16 @@ def video_loop(S):
         if os.path.exists(YIELD):
             time.sleep(0.8)
             continue
+        if cur_dev() == OFF_DEV:
+            if not OFF_LOGGED[0]:
+                OFF_LOGGED[0] = True
+                log("[video] 摄像头已关闭（手动关的，ffmpeg 不起）")
+            time.sleep(0.5)
+            continue
+        if OFF_LOGGED[0]:
+            OFF_LOGGED[0] = False
+            log("[video] 摄像头已重新打开")
+
         cmd = [FFMPEG, "-hide_banner", "-loglevel", "error",
                # 低延迟三件套：nobuffer 不让解复用攒帧、low_delay 关掉内部
                # 重排序、probesize/analyzeduration 压到最小跳过探测。
@@ -343,6 +355,7 @@ def main():
                 "heard": heard,
                 "face": fc,
                 "device": {"video": VIDEO_DEV, "audio": AUDIO_DEV},
+        "cam_off": cur_dev() == OFF_DEV,
             }
             try:
                 tmp = STATE + ".tmp"
