@@ -1,124 +1,119 @@
-# AI 无人直播：把「图 1 那种直播间」搭出来
+# 大肥鱼 · 通话页 + 记忆星图
 
-目标形态：**AI 自己玩游戏 + 看着画面说人话 + 读弹幕回应 + 点歌 + 打赏兑 Token**，一个人不用出镜。
+一个跑在本机的「虚拟形象视频通话」页面，加一张把长期记忆画成星图的可视化。
 
-现在这套已经**跑通并用真画面验证过**（`preview-live.mp4` 就是本机 OBS 录出来的成品画面）。
+不是演示视频，是能真用的东西：她看得见摄像头里的你，听得懂你在说什么，用克隆出来的声音回答，
+记得住你昨天说过的话 —— 然后这些记忆会变成星图上一颗颗能点开的星。
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  OBS 场景  ──▶ 抖音/ B站 RTMP 推流                            │
-│                                                              │
-│  ① 游戏采集源（Terraria.exe）        全屏 1728x1080           │
-│  ② 浏览器源 panel.html               1920x1080 透明叠在上面   │
-│        ▲ 每 0.8s 轮询 /state                                 │
-│        │                                                     │
-│  bridge.js (127.0.0.1:8765)  ◀── POST /push /danmaku /song   │
-│        ▲                          ▲                          │
-│        │                          │                          │
-│   brain.ps1（看画面→决策→注入）   danmaku.py（抖音弹幕）       │
-│        │                          ▲                          │
-│        ▼                          │                          │
-│   sai.ps1  SendInput  ──▶ 游戏真实响应                        │
-│   tts.ps1  Claude/SAPI  ──▶ 主播说话                          │
-└──────────────────────────────────────────────────────────────┘
+┌─ 通话页 live.html ───────────────────────────────────┐
+│  暖色书房背景（ComfyUI 生成）                          │
+│  Live2D 立绘（跟真模型，转头 / 眨眼 / 说话开口）         │
+│  HUD：记忆条数 · 检索延迟 · 摄像头亮度 · 你的表情        │
+│  底部：麦克风 · 输入框 · 摄像头开关 · 背景切换 · 时间轴   │
+└─────────────────────────────────────────────────────┘
+                  ↓ 点右上角那颗识海球
+┌─ 记忆星图 starmap.html ──────────────────────────────┐
+│  900 颗星、3823 条边，中心是 M87 那样的黑洞             │
+│  四层：黑洞(枢纽)/恒星(人物·重要)/星云(话题)/尘埃(零散)  │
+│  搜索 · 7 个类别页签 · 时间轴 · 点星星看完整记忆         │
+└─────────────────────────────────────────────────────┘
 ```
 
-## 目录
+## 文件分工
 
-| 文件 | 干什么 |
-|---|---|
-| `panel.html` | 直播间 UI（顶部 LIVE 条 / TOKEN 卡 / 游戏状态卡 / AI 回复 / 实时弹幕 / 点歌台），中间留空给游戏画面 |
-| `bridge.js` | 零依赖状态桥：给 OBS 浏览器源供页面，收各种脚本 POST 的状态 |
-| `state.json` | 当前直播状态（自动生成，面板读它） |
-| `brain.ps1` | AI 决策循环：OBS 截图 → 视觉模型 → 动作列表 → `sai.ps1` 注入 → 台词推面板 |
-| `tts.ps1` | 把台词念出来（Windows SAPI，零依赖；也支持 edge-tts 更好听的音色） |
-| `danmaku.md` | 抖音弹幕怎么接（三条路 + B站 10 行版） |
-| `preview-live.mp4` | 成品画面录像（面板 + 游戏合成后的效果） |
-
-依赖的底层能力在隔壁 `..\galgame-stream\`：`g.ps1`（OBS 截图）、`sai.ps1`（SendInput 注入）、`obs.ps1`（obs-websocket 控制）。
-
-## 一键起来
-
-```powershell
-# 0) 前提：OBS 开着、obs-websocket 4455 开着、泰拉瑞亚在玩
-cd 'D:\deepseek harness\ai-live'
-
-# 1) 状态桥
-Start-Process node -ArgumentList 'bridge.js' -WorkingDirectory (Get-Location)
-
-# 2) 面板已加进 OBS 场景「Game」（浏览器源 AIPanel，1920x1080 @ 0,0）
-#    重新加的话：
-#    ..\galgame-stream\obs.ps1 CreateInput -DataFile ..\galgame-stream\req.json
-#    （req.json 里 url = http://127.0.0.1:8765/）
-
-# 3) AI 开始玩（每 6 秒一轮）
-$env:AI_BASE  = 'https://api.openai.com/v1'   # 任何 OpenAI 兼容端点
-$env:AI_KEY   = 'sk-...'
-$env:AI_MODEL = 'gpt-4o-mini'                 # 必须支持 image_url
-.\brain.ps1 -Loop -Interval 6
-
-# 4) 弹幕（另开一个窗口）
-python danmaku.py
-
-# 5) 开播（需要平台给的串流地址+密钥）
-..\galgame-stream\obs.ps1 StartStream
-```
-
-## 面板怎么改成你自己的
-
-`panel.html` 是单文件，直接改：
-
-- **名字/头像**：`#s-name`、`#pfp`（emoji 或换成 `<img>`）
-- **卡片配色**：搜 `rgba(110,168,255` 全局替换色值
-- **AI 台词字号**：`#ai .line { font-size:31px }`（图 1 那种是一行 30 字左右，31px 刚好）
-- **弹幕条数**：`panel.html` 里 `dm.slice(-6)`，同时在 `bridge.js` 里 `state.danmaku.slice(-12)` 保持一致
-- **点歌台行数**：`sg.slice(0,5)`
-- **底部免责文案**：`#foot`（抖音要求标注「AI 生成内容」，别删）
-
-改完**不用重启**：OBS 浏览器源右键 →「刷新页面」即可（或在 OBS 设置里给浏览器源开「不可见时关闭」关掉，让它常驻）。
-
-## 抖音开播
-
-1. 手机/电脑装 **抖音直播伴侣**，或用 **抖音开放平台 → 直播 → 推流地址**
-2. 拿 `rtmp://...` + 密钥，填进 OBS：
-   ```powershell
-   Set-Content ..\galgame-stream\req.json '{"streamServiceType":"rtmp_common","streamServiceSettings":{"server":"rtmp://...","key":"..."}}' -Encoding ascii
-   ..\galgame-stream\obs.ps1 SetStreamServiceSettings -DataFile ..\galgame-stream\req.json
-   ..\galgame-stream\obs.ps1 StartStream
-   ```
-3. 直播间标题写清「AI 自动游玩」，按平台要求标注 AI 生成内容（图 1 底部那行小字就是干这个的）
-4. 竖屏的话：把 OBS 画布改成 1080x1920，`panel.html` 里的 `#dock` 三栏改成纵向堆叠（改 CSS `flex-direction`）
-
-## 变现那层（图 1 的 TOKEN 余额 / 点歌 / 礼物）
-
-面板上那几个数字不是装饰，是**钩子**：
-
-| 元素 | 数据来源 | 触发逻辑 |
+| 文件 | 干什么 | 依赖 |
 |---|---|---|
-| `TOKEN 余额 ¥173.53` | `/push token.balance` | 送礼 → `earned` 增加 → 攒够解锁「让 AI 做某件事」 |
-| `本轮已赚 ¥37.75` | `/push token.earned` | 同上 |
-| `点歌台` | `/song` | 弹幕「点歌 XXX」→ 队列 → 播放到谁的歌就念谁的名字 |
-| `实时弹幕` | `/danmaku` | 同时进 `brain.ps1` 的上下文，AI 下一轮会「回应」最近的弹幕 |
-| `AI 回复` | `brain.ps1` 出 `say` | 同时走 `tts.ps1` 念出来 = 有声音的 AI 主播 |
+| `live.html` | 通话页全部前端 | 浏览器（WebGL2） |
+| `starmap.html` | 记忆星图，单文件可双击打开 | 浏览器（canvas 2D） |
+| `voice_server.py` | 语音合成、`/api/talk`、MJPEG 摄像头、静态服务 | Python 3.11+、TTS 模型 |
+| `vision/vision.py` | 摄像头采集 + MediaPipe 人脸 + VAD + 语音转写 | ffmpeg、MediaPipe |
+| `gen_memory_graph.py` | 从记忆库导出星图数据 | 只读 SQLite |
 
-接入顺序建议：**先弹幕文本 → 再礼物计 Token → 最后点歌播放**。前两个不做，直播间就是个录屏；做了才有「活人」感。
+细节都在 [README-通话.md](README-通话.md)（三十多页，含每次踩坑的现场）。
+更早的无人直播那套在 [README-直播.md](README-直播.md)。
 
-## 图 2 那种（皮套 VTuber 型）
+## 它怎么串起来的
 
-另一条线，不是游戏：
+```
+浏览器                      voice_server.py             AstrBot 插件
+  │ 说话/打字 ───────────────→ /api/talk ──────────────→ /turn
+  │                            │                          ├ 检索长期记忆
+  │  ←──────── { text } ───────┘                          ├ 人格设定
+  │                                                       └ 大模型
+  │ ←──── /api/say (TTS wav) ←─ IndexTTS2 ← 参考音频（克隆音色）
+  │
+  │ ←──── /cam.mjpg (MJPEG) ── vision/latest.jpg ← ffmpeg ← 摄像头
+  │ ←──── state-vision.json ── 亮度 / 动作 / 人脸 / 听到的话
+```
 
-- **形象**：Live2D（`VTube Studio`）或 3D（`VSeeFace` / `Warudo`），OBS 用**虚拟摄像头或 Spout2** 采集
-- **口型**：`VTube Studio` 支持麦克风驱动；或者把 `tts.ps1` 的音频送进虚拟声卡（`VB-Cable`），让皮套跟 TTS 对口型
-- **画面**：背景图 + 皮套 + 弹幕纸片（浏览器源叠一层，逻辑和 `panel.html` 完全一样，只是把「AI 回复」换成「弹幕小纸条」）
-- **语音**：`tts.ps1` 换 `edge-tts`（`zh-CN-XiaoyiNeural` 很贴图 2 那种声线）
+- **看得见**：`vision/vision.py` 一直开着 ffmpeg 抓摄像头，每 3 帧跑一次 MediaPipe，
+  算出「正对镜头 / 侧过脸 / 低头」「笑的程度」「眼睛睁多大」；`think()` 把这些写进提示词，
+  所以她能说出「这么晚才来，眼睛都睁不开了吧」。
+- **听得懂**：同一进程做 VAD 断句 + faster-whisper 转写，`heard` 一更新页面就去 `/api/talk`。
+- **记得住**：通话内容每 6 轮由后台任务蒸馏成一条记忆（第三人称、带日期）写进 livingmemory，
+  QQ 那边也检索得到同一条。
 
-两种形态可以合并：**上游戏、下皮套**（游戏画面占 2/3，右下角小皮套 + 弹幕），这也是现在抖音最常见的布局。
+## 快速开始
 
-## 已知的坑
+```bash
+# 1. 摄像头与语音（后台常驻）
+python vision/vision.py --snap-every 5
 
-1. **`sai.ps1` 必须用 SendInput**，`mouse_event` 在这个游戏里只让按钮高亮、不触发点击（详见 `..\galgame-stream\README.md`）。
-2. **OBS 浏览器源的透明**要在源属性里勾「使用自定义 CSS」并填 `html,body{background:transparent}`，否则底部会白一块。
-3. **面板轮询 0.8s**，弹幕延迟感约 1 秒；要让弹幕「唰」一下出现，把 `setInterval(tick, 800)` 改 300，或改成 WebSocket（`bridge.js` 里加 `ws` 太麻烦，0.3s 轮询足够）。
-4. **AI 决策要限速**：`-Interval 6` 起步。太快会烧 token，太慢会卡在一个动作上重复挖。
-5. **模型必须能读图**。纯文本模型喂 base64 会瞎编坐标。
-6. 抖音对**无人直播**有风控：要有声音、要有画面变化、别连续几小时同一个静止画面。AI 玩游戏天然满足前两条。
+# 2. 服务（首次启动要加载 TTS，约 50-200 秒）
+python voice_server.py --port 8770
+
+# 3. 打开 http://127.0.0.1:8770/
+```
+
+`voice_server.py` 里的模型路径（`D:\index-tts`、`D:\sakana-py`）是这台机器的布局，换机器要改。
+星图不用起服务，双击 `starmap.html` 就能看。
+
+## 记忆星图的数据从哪来
+
+`gen_memory_graph.py` 只读地打开 livingmemory 的 SQLite：
+
+```bash
+python gen_memory_graph.py            # 生成 memory-graph.json + 内联进 starmap.html
+python tools/make_sample_graph.py     # 生成脱敏示例（仓库里放的就是这个）
+```
+
+- 取 `graph_nodes` 里度数最高的 **900** 个，和两端都在集合内的边（**3823** 条 / 库里 5400 条）
+- 布点：Fibonacci 球面撒点 → 沿真实边做 6 轮「弹簧 + 回归球面」→ 有关系的记忆自己聚成团
+- 半径按 `log2(1+度数)` 分层，颜色按节点类型，亮度按深度 + `created_at` 新近度
+- 画线按平均深度分档，每档一次 `beginPath`，3800 条线也只有 4 次 `stroke`
+
+> 仓库里的 `memory-graph.sample.json` 和 `starmap.html` 内联的数据**已经脱敏**：
+> 保留拓扑、类别、度数、坐标、重要性，实体名和记忆正文换成占位内容。
+> 自己跑 `gen_memory_graph.py` 得到的是真数据。
+
+## 踩过的坑（代码注释里都有现场）
+
+- **鼻梁上的黑块**：Cubism 的 `dynamicFlags & 1` 是 isVisible，漏判会把遮罩网格当普通网格画出来。
+  最后在 pixi 里按「尺寸 + 亮度」筛候选、逐个隐藏验证，定位到第 513、514 号网格。
+- **摄像头延迟 94ms → 39ms**：`-fflags nobuffer -flags low_delay -probesize 32`、
+  每帧都写 `latest.jpg`（不是每 2 帧）、消费者用条件变量等而不是 50ms 轮询。
+- **流式 TTS 的爆音**：IndexTTS 流式 yield 的是 int16 量级的 float，
+  按 `clip(x,-1,1)*32767` 处理会把整段压成方波。先判 `max(|a|) > 4` 再除 32768。
+- **点识海球卡死**：`/cam.mjpg` 是永不结束的流，占着同域 6 个并发连接里的一个，
+  iframe 的请求就排队。打开星图前先把 `<img src>` 摘掉。
+- **`.hud{pointer-events:none}`** 会传给整棵子树，控制条全点不动 —— 需要点的显式收回 `auto`。
+
+## 已知限制
+
+- 只在 Windows 上跑（DirectShow 采摄像头）
+- TTS 要 5 GB 显存，和本地大模型抢同一张卡，得错峰
+- 星图在 4K + 放大 3 倍时掉到 30fps 左右（视锥剔除、按 zoom 限边都做了）
+- 说完到听见约 4-6 秒（大模型 1-1.5s + TTS 首包 2.4-3.3s）
+
+## 署名
+
+Live2D 模型「大肥鱼」：
+
+> 原画及拆分 **神宫凉子** · Live2D 建模 **霓虹猫_NeonNeko** · 模型来源 **神宫凉子免费配布模型**
+
+模型文件不随仓库分发（作者授权禁止重新分发）。`bg/` 下三张背景由本项目的 ComfyUI 工作流生成。
+
+## License
+
+代码 MIT。模型、参考音频、真实记忆数据不在授权范围内。

@@ -43,3 +43,32 @@ tts/refs/cover_full.wav
 svc/paused.flag
 
 *.lnk
+
+# ─────────────────────────────────────────────────────────────
+# 发布前清理：这些是开发过程中的调试产物，不进仓库
+# ─────────────────────────────────────────────────────────────
+
+# 每一个中间状态的截图（bg/ 里的背景图不在根目录，不受影响）
+/*.png
+/*.jpg
+/*.mp4
+/bkscan/
+/live2d/*.png
+/chibi/
+/obs/
+
+# 声音样本：里面是真人的声音，属于隐私
+/tts/
+*.wav
+
+# 真实记忆图谱（含聊天原文）—— 仓库里只放 memory-graph.sample.json
+/memory-graph.json
+memstarmap/data/graph.json
+
+# 发布用：原始素材与可下载的模型权重不进仓库
+/boot/deepseek-cyberpunk-intro*.mp4
+/vision/models/
+*.lnk
+*.bak
+*.bak2
+*.bak-*
