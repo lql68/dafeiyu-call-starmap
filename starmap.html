@@ -229,7 +229,15 @@
     var p = rotate(nd.x, nd.y, nd.z);
     var dz = p[2];
     var s = FOV / (FOV + dz);
+    /* 只要有一个点算出 NaN/Infinity，后面 drawImage 就会抛 RangeError，
+       整帧从这里中断 —— 画面上就是"星星忽然全没了"。所以先挡住。 */
+    if(!isFinite(s) || s <= 0 || !isFinite(dz)){
+      PX[i] = -99999; PY[i] = -99999; PS[i] = 0; PZ[i] = dz;
+      LENSED && (LENSED[i] = 0);
+      return;
+    }
     var sc = R * s * zoom * (DENS ? DENS[i] : 1);
+    if(!isFinite(sc)){ PX[i] = -99999; PY[i] = -99999; PS[i] = 0; PZ[i] = dz; return; }
     PZ[i] = dz;
     PS[i] = s;
     PX[i] = CX + p[0] * sc;
@@ -272,6 +280,9 @@
     ctx.fillRect(0, 0, W, H);
 
 
+    /* 交互期间降质：拖一下几百毫秒，先保证手感，停手立刻恢复全量 */
+    var light = (performance.now() - lastInteract) < 240;
+
     /* ── 星云层：话题节点周围铺大而淡的暖色团，先用它做出"云雾底" ── */
     var nebN = 0;
     for(var nb = 0; nb < NODES.length && nebN < 140; nb++){
@@ -286,6 +297,8 @@
       var stretch = 1.55 + ((nb * 71) % 100) / 100 * 0.75;
       var sq = Math.sqrt(stretch);
       var wN = nr * 2 / sq, hN = nr * 2 * stretch / sq;
+      if(!isFinite(wN) || !isFinite(hN) || wN <= 0 || hN <= 0) continue;
+      if(light && (nb % 4)) continue;            /* 拖动/缩放时只留四分之一，停手再补全 */
       ctx.globalAlpha = Math.min(1, na * 2.4);
       ctx.drawImage(SPRITE.nebula, PX[nb] - wN * 0.5, PY[nb] - hN * 0.5, wN, hN);
       ctx.globalAlpha = 1;
@@ -293,7 +306,8 @@
     /* 线：按深度分档，每档一次 beginPath */
     var buckets = [];
     for(var b=0;b<BUCKET;b++) buckets.push([]);
-    for(var k=0;k<LINKS.length;k++){
+    var lstep = light ? 3 : 1;                  /* 拖动时每 3 条画 1 条 */
+    for(var k=0;k<LINKS.length;k+=lstep){
       var l = LINKS[k];
       var a = l[0], bb = l[1];
       if(a >= NODES.length || bb >= NODES.length) continue;
@@ -380,6 +394,8 @@
 
       /* 尘埃：小、暗、密 —— 不抢戏，但铺出"体积感" */
       if(lay === 'dust'){
+        if(PX[idx] < -90000) continue;
+        if(light && (idx % 2)) continue;
         var rr0 = (0.62 + Math.log2(1 + deg) * 0.20) * s2 * (0.72 + 0.40 * (CLUSTER ? CLUSTER[idx] : 1));
         if(rr0 < 0.28) rr0 = 0.28;
         var cw = CLUSTER ? CLUSTER[idx] : 1;
@@ -545,15 +561,18 @@
   /* ── 交互 ───────────────────────────────── */
   var dragging = false, lastX = 0, lastY = 0;
   var zoom = 1.0;              /* 滚轮缩放 */
+  var lastInteract = 0;        /* 最后一次拖动/缩放的时刻，用来在交互期间降质 */
 
   cv.addEventListener('wheel', function(e){
     e.preventDefault();
     zoom *= (e.deltaY > 0) ? 0.92 : 1.085;
     zoom = Math.max(0.32, Math.min(3.2, zoom));
+    lastInteract = performance.now();
   }, { passive:false });
 
   cv.addEventListener('pointerdown', function(e){
     dragging = true; lastX = e.clientX; lastY = e.clientY;
+    lastInteract = performance.now();
     cv.setPointerCapture(e.pointerId);
   });
   cv.addEventListener('pointerup', function(e){
@@ -568,6 +587,9 @@
       pitch += (my - lastY) * 0.005;
       pitch = Math.max(-1.2, Math.min(1.2, pitch));
       lastX = mx; lastY = my;
+      lastInteract = performance.now();
+      tip.style.opacity = 0;       /* 拖动中不做命中测试，省下每帧 900 次距离比较 */
+      return;
     }
 
     /* 命中测试 */
