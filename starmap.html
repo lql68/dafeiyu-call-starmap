@@ -187,6 +187,11 @@
   var LENSED = null;          // 每个节点被引力透镜放大的程度（0~1）
   var BHR = 0;                // 中央黑洞视界半径（frame 每帧算）
 
+  /* ── 记忆节点的物理：坠落进度 0→1，越老、越不重要掉得越快 ──
+     掉到 0.94 之后就不再绘制（= 被视界吞掉），随后回到外圈重新开始。
+     这样星图是"活"的：记忆一直在缓慢流向黑洞，又在球壳外缘重现。 */
+  var LF = null, FSP = null;
+
   /* ── 吸积盘粒子 + 极区喷流（都以为视界半径 BHR 为单位，绘制时再乘）── */
   var INC_BH = 0.62;          // 盘面倾角
   var FOV_BH = 7.5;           // 透视焦距
@@ -321,7 +326,18 @@
 
   function project(i){
     var nd = NODES[i];
-    var p = rotate(nd.x, nd.y, nd.z);
+
+    /* 被视界吞掉的（进度 > 0.94）直接踢出画面 */
+    if(LF && LF[i] > 0.96){
+      PX[i] = -99999; PY[i] = -99999; PS[i] = 0; PZ[i] = 0;
+      LENSED && (LENSED[i] = 0);
+      return;
+    }
+    /* 越接近视界缩得越小 —— 加上原有的引力透镜外推，
+       观感就是"被拉成一道细丝、然后没了" */
+    var kk = LF ? (1 - 0.62 * LF[i]) : 1;
+
+    var p = rotate(nd.x * kk, nd.y * kk, nd.z * kk);
     var dz = p[2];
     var s = FOV / (FOV + dz);
     /* 只要有一个点算出 NaN/Infinity，后面 drawImage 就会抛 RangeError，
@@ -377,6 +393,25 @@
 
     if(!paused){ yaw += yawVel * dt; }
     if(!paused){ spin += dt * 0.00055; }        /* 盘自转：约 3.6 秒一圈 */
+
+    /* ── 记忆节点的物理：推进坠落进度 ── */
+    if(!LF && NODES.length){
+      LF  = new Float32Array(NODES.length);
+      FSP = new Float32Array(NODES.length);
+      for(var i0 = 0; i0 < NODES.length; i0++){
+        var nd0 = NODES[i0];
+        LF[i0] = Math.random() * 0.10;              /* 只打散相位，别让球一开始就缩掉一半 */
+        FSP[i0] = 0.000006
+                * (1 + Math.min(5, nd0.a || 0) * 0.38)          /* 越老越快 */
+                * (1 - 0.55 * Math.min(1, nd0.imp || 0));       /* 越重要越慢 */
+      }
+    }
+    if(LF && !paused){
+      for(var i1 = 0; i1 < NODES.length; i1++){
+        LF[i1] += FSP[i1] * dt;
+        if(LF[i1] >= 1) LF[i1] -= 1;
+      }
+    }
 
     /* 投影全部点 */
     for(var i=0;i<NODES.length;i++) project(i);
