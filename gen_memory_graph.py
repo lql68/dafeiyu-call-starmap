@@ -89,6 +89,37 @@ cand = cand[:MAX_NODES]
 keep = {n["id"]: i for i, n in enumerate(cand)}
 
 TYPES = ["topic", "fact", "entity", "event", "person", "preference", "other"]
+
+# ── 语义类别（前端按 c 上色）────────────────────────────────
+# 0 人物 / 1 技能 / 2 情绪 / 3 约定计划 / 4 爱好 / 5 习惯 / 6 其他
+CATS = ["人物", "技能", "情绪", "约定计划", "爱好", "习惯", "其他"]
+
+CAT_RULES = [
+    (1, ["报错", "token", "模型", "部署", "显存", "脚本", "api", "上下文", "超时",
+         "服务器", "代码", "命令行", "安装", "配置", "接口", "日志", "进程", "端口",
+         "权重", "推理", "训练", "提示词", "prompt", "gpu", "显卡", "内存", "数据库",
+         "插件", "爬虫", "反代", "webui", "docker", "python", "node", "git"]),
+    (2, ["担心", "害怕", "喜欢", "讨厌", "生气", "委屈", "开心", "难过", "累",
+         "烦", "急", "哭", "舍不得", "心疼", "孤独", "焦虑", "安心", "吃醋",
+         "想念", "不想", "愿意", "无奈", "感动", "高兴", "伤心", "紧张"]),
+    (3, ["说好", "答应", "明天", "等下", "记得", "等我", "回来", "约好", "回头",
+         "晚点", "待会", "提醒", "别忘了", "下次", "先说", "等会", "一会儿", "改天"]),
+    (4, ["吃", "玩", "看", "听", "喝", "抖音", "b站", "游戏", "音乐", "动漫",
+         "电影", "零食", "饭", "奶茶", "咖啡", "唱歌", "拍照", "追番", "番剧"]),
+    (5, ["每天", "总是", "经常", "一直", "老是", "习惯", "照例", "每次", "又",
+         "天天", "从来", "向来"]),
+]
+
+
+def classify(node_type, value):
+    if node_type == "person":
+        return 0
+    v = (value or "").lower()
+    for idx, kws in CAT_RULES:
+        for kw in kws:
+            if kw in v:
+                return idx
+    return 6
 maxd = max((deg.get(n["id"], 0) for n in cand), default=1) or 1
 nodes = []
 for n in cand:
@@ -99,8 +130,10 @@ for n in cand:
     d = deg.get(n["id"], 0)
     # 度数越高越靠球心，外围是只有一两条边的零散记忆 —— 一眼能看出"核心/边缘"
     rad = round(1.0 - 0.40 * (math.log2(1 + d) / math.log2(1 + maxd)), 3)
+    cat = classify(n["node_type"], value)
     nodes.append({
         "t": tidx,
+        "c": cat,
         "k": n["node_type"],
         "imp": round(imp.get(n["id"], 0.0), 3),
         "d": d,
@@ -164,3 +197,8 @@ print("导出 ->", OUT)
 print("  ", os.path.getsize(OUT) // 1024, "KB")
 print("   节点", N, "/", meta["nodes_all"], "  边", len(links), "/", meta["edges_all"])
 print("   原子", meta["atoms_all"], "  文档", meta["docs_all"], "  最大度数", meta["max_degree"])
+cnt = {}
+for nd in nodes:
+    cnt[CATS[nd["c"]]] = cnt.get(CATS[nd["c"]], 0) + 1
+print("   类别:", "  ".join(f"{k} {v}" for k, v in
+      sorted(cnt.items(), key=lambda kv: -kv[1])))
