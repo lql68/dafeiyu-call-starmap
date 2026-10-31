@@ -700,7 +700,7 @@ async function connect(){
     startRaf();
     pumpInbox();
     initChatBar();
-    setTimeout(()=>{ speakStream('接通了。我看得见你。'); }, 700);
+    setTimeout(()=>{ say('接通了。我看得见你。'); }, 700);
   }catch(e){
     $('gateMsg').textContent = '音频初始化失败：' + e.message;
     if($('chatInput')) $('chatInput').placeholder = '接通失败：' + e.message;
@@ -758,7 +758,7 @@ function initChatBar(){
         body: JSON.stringify({text:t, state: sceneState(lastState || {}), history})
       });
       const j = await r.json();
-      if(j.text){ $('thinkMs').textContent = (j.ms||0) + ' ms'; await speakStream(j.text); }
+      if(j.text){ $('thinkMs').textContent = (j.ms||0) + ' ms'; await say(j.text); }
       else { await speak('（她那边没接上话）'); }
     }catch(e){
       await speak('（接话服务没响应）');
@@ -828,6 +828,16 @@ async function speakPipe(text){
     if(seq !== speakGen) return;
   }
   playing = false;
+}
+
+/* 播放方式开关。
+   默认走「整段合成 + audioEl 播放」——这条路从头到尾是一条连续的音频流，
+   不存在接缝，也就不该有爆音。流式（分块推送）是为了压首包延迟才加的，
+   但它把一条音频切成几十块、每块单独起播，接缝在浏览器里会变成「咔」。
+   想试流式：地址后面加 ?stream=1                                        */
+const USE_STREAM = /[?&]stream=1/.test(location.search);
+function say(text){
+  return USE_STREAM ? speakStream(text) : speak(text);
 }
 
 async function speak(text){
@@ -1138,7 +1148,7 @@ async function respond(heard){
     history.push({role:'her', text: line});
     if(history.length > 12) history.shift();
     lastRespondAt = Date.now();
-    await setEmotion(line); speakStream(line);
+    await setEmotion(line); say(line);
     $('thinkMs').textContent = j.ms + ' ms';
   }catch(e){
     /* 模型没起来就退回现成台词，别让她哑掉 */
