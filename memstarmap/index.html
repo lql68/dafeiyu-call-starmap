@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>记忆星图 MEMORY STARMAP</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <canvas id="view"></canvas>
+
+    <!-- 顶栏 HUD：搜索 + 衰减阈值 -->
+    <div id="topbar">
+      <div id="search" class="hud-box">
+        <span class="hud-label">Search Memory</span>
+        <input id="searchInput" type="text" placeholder="搜索记忆关键词…" autocomplete="off" spellcheck="false" />
+        <span id="searchCount" class="hud-value"></span>
+      </div>
+      <div id="decayCtl" class="hud-box">
+        <span class="hud-label">Decay Filter</span>
+        <input id="decaySlider" type="range" min="0" max="1" step="0.01" value="0.5" />
+        <span id="decayValue" class="hud-value">0.50</span>
+      </div>
+    </div>
+
+    <!-- 底部左：类型图例 -->
+    <div id="legend">
+      <div class="lg-item"><span class="lg-dot" data-type="fact"></span><span>Fact · 冷白</span></div>
+      <div class="lg-item"><span class="lg-dot" data-type="topic"></span><span>Topic · 暖米</span></div>
+      <div class="lg-item"><span class="lg-dot" data-type="person"></span><span>Person · 青绿</span></div>
+    </div>
+
+    <!-- 底部右：操作提示 -->
+    <div id="hint">拖拽旋转 · 滚轮缩放 · 双击复位</div>
+
+    <!-- 悬停提示 -->
+    <div id="tooltip" class="tooltip" style="display:none;">
+      <div class="tt-text"></div>
+      <div class="tt-sub"></div>
+    </div>
+
+    <!-- 底部状态条 -->
+    <div id="statusbar">
+      <div id="st-counts"></div>
+      <div id="st-ops"></div>
+    </div>
+
+    <!-- 右下角 toast -->
+    <div id="toast" class="toast" style="display:none;">
+      <div id="toast-msg"></div>
+    </div>
+
+    <!-- 二次确认弹框 -->
+    <div id="modalMask" class="modal-mask" style="display:none;">
+      <div id="modal" class="modal">
+        <div id="modal-title" class="modal-title">二次确认</div>
+        <div id="modal-text" class="modal-text"></div>
+        <div class="modal-btns">
+          <button id="modal-cancel" class="hud-btn">取消</button>
+          <button id="modal-ok" class="hud-btn hud-btn-danger">确认执行</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右侧详情面板 -->
+    <aside id="panel" class="panel">
+      <div class="panel-head">
+        <div>
+          <div id="p-type" class="panel-type">TOPIC</div>
+          <div id="p-value" class="panel-value"></div>
+        </div>
+        <button id="p-close" class="p-close" title="关闭">×</button>
+      </div>
+      <div id="p-body">
+        <div id="p-node-sec"></div>
+        <div id="p-atoms-sec"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div id="errorMsg" class="error-msg" style="display:none;"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,359 @@
+/* ============================================================
+   记忆星图 MEMORY STARMAP — 样式
+   语言：仪器面板 / 深空底色，不使用圆角大卡片、不使用发光科技按钮
+   ============================================================ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: #0B0F15;
+  overflow: hidden;
+  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+  color: #C7C8CB;
+}
+
+#app { position: fixed; inset: 0; }
+
+#errorMsg {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  max-width: min(560px, calc(100vw - 48px));
+  background: rgba(11, 15, 21, 0.95);
+  border: 1px solid rgba(217, 196, 154, 0.55);
+  border-radius: 2px;
+  padding: 12px 16px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: #D9C49A;
+  text-align: center;
+}
+
+/* ---------- 画布 ---------- */
+#view {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #0B0F15;
+  cursor: grab;
+  touch-action: none;
+}
+#view:active { cursor: grabbing; }
+
+/* ---------- 顶栏 HUD ---------- */
+#topbar {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(580px, calc(100vw - 32px));
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  pointer-events: none;
+  z-index: 10;
+}
+#app.panel-open #topbar { left: 312px; transform: none; }
+.hud-box {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(11, 15, 21, 0.92);
+  border: 1px solid rgba(91, 98, 107, 0.55);
+  border-radius: 2px;
+  padding: 6px 10px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+#search { flex: 1; }
+#decayCtl { flex: 0 0 168px; }
+
+.hud-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #5B626B;
+  white-space: nowrap;
+}
+
+#searchInput {
+  flex: 1;
+  min-width: 0;
+  background: rgba(13, 18, 24, 0.85);
+  border: none;
+  border-left: 1px solid rgba(91, 98, 107, 0.35);
+  outline: none;
+  color: #C7C8CB;
+  font-size: 12px;
+  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+  height: 28px;
+}
+#searchInput::placeholder { color: #5B626B; }
+#searchInput:focus { border-left-color: rgba(217, 196, 154, 0.6); }
+
+.hud-value {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  color: #D9C49A;
+  min-width: 30px;
+  text-align: right;
+}
+
+#decaySlider { flex: 0 0 auto; width: 120px; accent-color: #D9C49A; }
+
+/* ---------- 底部图例 ---------- */
+#legend {
+  position: absolute;
+  left: 18px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 10;
+  pointer-events: none;
+}
+.lg-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #8A8F96;
+}
+.lg-dot { width: 7px; height: 7px; border-radius: 50%; }
+.lg-dot[data-type="fact"]   { background: #DEE5EE; }
+.lg-dot[data-type="topic"]  { background: #CFAF72; }
+.lg-dot[data-type="person"] { background: #7DD6BE; }
+
+/* ---------- 底部提示 ---------- */
+#hint {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #5B626B;
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* ---------- 悬停提示 ---------- */
+.tooltip {
+  position: fixed;
+  z-index: 60;
+  max-width: 240px;
+  background: rgba(11, 15, 21, 0.95);
+  border: 1px solid rgba(91, 98, 107, 0.55);
+  border-radius: 2px;
+  padding: 8px 10px;
+  pointer-events: none;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+.tooltip .tt-text { font-size: 11px; color: #C7C8CB; line-height: 1.6; word-break: break-all; }
+.tooltip .tt-sub { margin-top: 4px; font-size: 10px; color: #D9C49A; letter-spacing: 0.08em; }
+
+/* ---------- 底部状态条 ---------- */
+#statusbar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  max-width: calc(100vw - 32px);
+  background: rgba(11, 15, 21, 0.92);
+  border: 1px solid rgba(91, 98, 107, 0.55);
+  border-radius: 2px;
+  padding: 6px 14px;
+  pointer-events: none;
+}
+#st-counts { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 10px; color: #8A8F96; white-space: nowrap; }
+#st-counts b { color: #D9C49A; font-weight: 600; }
+#st-ops { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 10px; color: #5B626B; white-space: nowrap; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- toast（右下角） ---------- */
+#toast {
+  position: fixed;
+  right: 18px;
+  bottom: 16px;
+  z-index: 80;
+  max-width: 320px;
+  background: rgba(11, 15, 21, 0.95);
+  border: 1px solid rgba(91, 98, 107, 0.55);
+  border-radius: 2px;
+  padding: 10px 12px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.7;
+}
+#toast.ok { border-color: rgba(127, 211, 192, 0.55); }
+#toast.fail { border-color: rgba(217, 196, 154, 0.65); }
+#toast-msg { color: #C7C8CB; word-break: break-all; }
+#toast.ok #toast-msg { color: #7FD3C0; }
+#toast.fail #toast-msg { color: #D9C49A; }
+
+/* ---------- 二次确认弹框 ---------- */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(5, 8, 12, 0.72);
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.modal-mask.open { display: flex; }
+.modal {
+  width: min(420px, calc(100vw - 48px));
+  background: rgba(11, 15, 21, 0.97);
+  border: 1px solid rgba(91, 98, 107, 0.6);
+  border-radius: 2px;
+  padding: 18px;
+}
+.modal-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #5B626B;
+}
+.modal-text { margin-top: 10px; font-size: 12px; line-height: 1.8; color: #C7C8CB; word-break: break-all; }
+.modal-btns { margin-top: 16px; display: flex; gap: 10px; justify-content: flex-end; }
+
+.hud-btn {
+  background: transparent;
+  border: 1px solid rgba(91, 98, 107, 0.55);
+  color: #8A8F96;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 6px 12px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.hud-btn:hover { color: #D9C49A; border-color: rgba(217, 196, 154, 0.6); }
+.hud-btn-danger:hover { color: #D9C49A; border-color: rgba(217, 196, 154, 0.6); background: rgba(217, 196, 154, 0.06); }
+
+/* ---------- 右侧详情面板 ---------- */
+.panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 300px;
+  background: rgba(11, 15, 21, 0.92);
+  border-left: 1px solid rgba(91, 98, 107, 0.45);
+  border-radius: 0;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transform: translateX(103%);
+  transition: transform 0.35s ease;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.panel.open { transform: translateX(0); }
+
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid rgba(91, 98, 107, 0.35);
+}
+.panel-type {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #D9C49A;
+}
+.panel-value {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #C7C8CB;
+  line-height: 1.6;
+}
+
+.p-close {
+  background: transparent;
+  border: 1px solid rgba(91, 98, 107, 0.55);
+  color: #8A8F96;
+  font-size: 14px;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.p-close:hover { color: #D9C49A; border-color: rgba(217, 196, 154, 0.6); }
+
+.panel-body { flex: 1; overflow-y: auto; padding: 12px 16px 20px; }
+
+.p-sec { margin-bottom: 18px; }
+.p-sec-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #5B626B;
+  margin-bottom: 8px;
+}
+
+.p-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(91, 98, 107, 0.18);
+}
+.p-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: #5B626B; }
+.p-val { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 11px; color: #D9C49A; }
+
+/* ---------- atom 卡 ---------- */
+.p-atom {
+  border: 1px solid rgba(91, 98, 107, 0.35);
+  border-radius: 2px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.p-atom.expired { border-color: rgba(217, 196, 154, 0.4); background: rgba(217, 196, 154, 0.04); }
+.p-atom-top { display: flex; justify-content: space-between; align-items: baseline; }
+.p-atom-type {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #7FD3C0;
+}
+.p-atom.expired .p-atom-type { color: #D9C49A; }
+.p-atom-imp { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 10px; color: #D9C49A; }
+.p-atom-text { font-size: 11px; color: #C7C8CB; line-height: 1.6; word-break: break-all; margin-top: 4px; }
+.p-atom-meta { margin-top: 4px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 10px; color: #8A8F96; }
+.p-atom-exp {
+  margin-top: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #B08968;
+}
+.p-atom-ops { margin-top: 8px; display: flex; gap: 6px; }
+.p-imp-row { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+.p-imp-row input[type="range"] { flex: 1; accent-color: #D9C49A; height: 14px; }

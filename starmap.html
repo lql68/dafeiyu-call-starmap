@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>记忆星图 · 方案一 星云丝弦</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#05070C; }
+  #cv { display:block; width:100%; height:100%; cursor:crosshair; }
+  .vignette {
+    position:fixed; inset:0; pointer-events:none;
+    background:
+      radial-gradient(circle at 50% 46%, rgba(24,40,68,.55) 0%, rgba(5,7,12,0) 62%),
+      radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 55%, rgba(0,0,0,.72) 100%);
+  }
+  .hud {
+    position:fixed; left:28px; top:24px; pointer-events:none;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size:11px; letter-spacing:.14em; color:#5B6A80; line-height:1.9;
+  }
+  .hud b { color:#9FB4CC; font-weight:400; }
+  .hud .t { color:#3E4A5C; }
+  .tip {
+    position:fixed; pointer-events:none; opacity:0; transition:opacity .12s;
+    max-width:340px; padding:9px 12px; border-radius:3px;
+    background:rgba(8,13,21,.94); border:1px solid rgba(90,120,160,.30);
+    font-family: -apple-system, "Microsoft YaHei", sans-serif;
+    font-size:12.5px; line-height:1.65; color:#CBD9E8;
+    box-shadow:0 10px 34px rgba(0,0,0,.6);
+  }
+  .tip .m {
+    display:block; margin-top:5px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size:10.5px; letter-spacing:.1em; color:#6E819A;
+  }
+  .foot {
+    position:fixed; left:28px; bottom:22px; pointer-events:none;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size:10.5px; letter-spacing:.13em; color:#3A4557;
+  }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="vignette"></div>
+<div class="hud">
+  <div class="t">MEMORY STAR MAP</div>
+  <div>节点 <b id="hn">—</b> · 连线 <b id="he">—</b></div>
+  <div>库里共 <b id="ha">—</b> 节点 / <b id="hb">—</b> 边</div>
+  <div>帧率 <b id="hf">—</b> fps</div>
+</div>
+<div class="tip" id="tip"></div>
+<div class="foot">拖动 = 转视角 · 空格 = 暂停自转 · 点节点 = 只看它和它认识的</div>
+
+<script>
+(function(){
+  'use strict';
+
+  var cv   = document.getElementById('cv');
+  var ctx  = cv.getContext('2d', { alpha:false });
+  var tip  = document.getElementById('tip');
+  var hn   = document.getElementById('hn');
+  var he   = document.getElementById('he');
+  var ha   = document.getElementById('ha');
+  var hb   = document.getElementById('hb');
+  var hf   = document.getElementById('hf');
+
+  /* 类型码 -> 颜色。4=person 3=topic 其它=fact/杂项 */
+  var TONE = {
+    0: [207, 224, 240],   // fact   冷白
+    1: [207, 224, 240],
+    2: [156, 164, 178],   // 其它
+    3: [232, 212, 174],   // topic  暖棕
+    4: [214, 170, 198]    // person 淡紫（人比事更"热"一点）
+  };
+
+  /* 每个类型预渲染一张 64px 的径向渐变精灵，画点时 drawImage 缩放 */
+  var SPRITE = {};
+  function makeSprite(rgb){
+    var S = 64;
+    var c = document.createElement('canvas');
+    c.width = c.height = S;
+    var g = c.getContext('2d');
+    var grad = g.createRadialGradient(S/2, S/2, 0, S/2, S/2, S/2);
+    grad.addColorStop(0,    'rgba(' + rgb + ',1)');
+    grad.addColorStop(0.26, 'rgba(' + rgb + ',.66)');
+    grad.addColorStop(0.60, 'rgba(' + rgb + ',.20)');
+    grad.addColorStop(1,    'rgba(' + rgb + ',0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, S, S);
+    return c;
+  }
+  Object.keys(TONE).forEach(function(k){ SPRITE[k] = makeSprite(TONE[k].join(',')); });
+
+  var NODES = [], LINKS = [];
+  var PX, PY, PS, PZ;         // 每帧投影缓存
+  var adj = [];               // 邻接表：选中时用
+  var hover = -1, picked = -1;
+  var yaw = 0, pitch = -0.18, yawVel = 0.00030;
+  var parallax = 0, parallaxY = 0;
+  var paused = false;
+  var W = 0, H = 0, DPR = 1, R = 300, CX = 0, CY = 0;
+
+  var FOV = 2.55;
+  var BUCKET = 4;             // 线分几档描（第 4 档 = 超级节点边，压暗）
+  var lastT = 0, fpsAcc = 0, fpsN = 0, fpsShow = 0;
+
+  function resize(){    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = cv.clientWidth; H = cv.clientHeight;
+    cv.width  = Math.round(W * DPR);
+    cv.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    CX = W * 0.5; CY = H * 0.5;
+    R  = Math.min(W, H) * 0.40;
+  }
+
+  function load(){
+    return fetch('memory-graph.json', { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        NODES = d.nodes || [];
+        LINKS = d.links || [];
+        var n = NODES.length;
+        PX = new Float32Array(n); PY = new Float32Array(n);
+        PS = new Float32Array(n); PZ = new Float32Array(n);
+        adj  = new Array(n);
+        for(var i=0;i<n;i++) adj[i] = [];
+        for(var k=0;k<LINKS.length;k++){
+          var a = LINKS[k][0], b = LINKS[k][1];
+          if(a < n && b < n){ adj[a].push(b); adj[b].push(a); }
+        }
+        var m = d.meta || {};
+        hn.textContent = n;
+        he.textContent = LINKS.length;
+        ha.textContent = m.nodes_all || '—';
+        hb.textContent = m.edges_all || '—';
+      });
+  }
+
+  function rotate(x, y, z){
+    var cy = Math.cos(yaw), sy = Math.sin(yaw);
+    var x1 = x * cy - z * sy;
+    var z1 = x * sy + z * cy;
+    var cp = Math.cos(pitch), sp = Math.sin(pitch);
+    var y2 = y * cp - z1 * sp;
+    var z2 = y * sp + z1 * cp;
+    return [x1, y2, z2];
+  }
+
+  function project(i){
+    var nd = NODES[i];
+    var p = rotate(nd.x, nd.y, nd.z);
+    var dz = p[2];
+    var s = FOV / (FOV + dz);
+    var sc = R * s;
+    PZ[i] = dz;
+    PS[i] = s;
+    PX[i] = CX + p[0] * sc + parallax  * sc * 26;
+    PY[i] = CY + p[1] * sc + parallaxY * sc * 26;
+  }
+
+  function frame(t){
+    requestAnimationFrame(frame);
+    var dt = Math.min(64, t - lastT || 16);
+    lastT = t;
+
+    if(!paused){ yaw += yawVel * dt; }
+
+    /* 投影全部点 */
+    for(var i=0;i<NODES.length;i++) project(i);
+
+    /* 背景 */
+    ctx.fillStyle = '#05070C';
+    ctx.fillRect(0, 0, W, H);
+
+    /* 线：按深度分档，每档一次 beginPath */
+    var buckets = [];
+    for(var b=0;b<BUCKET;b++) buckets.push([]);
+    for(var k=0;k<LINKS.length;k++){
+      var l = LINKS[k];
+      var a = l[0], bb = l[1];
+      if(a >= NODES.length || bb >= NODES.length) continue;
+      var dmid = (PZ[a] + PZ[bb]) * 0.5;
+      var bin = dmid < -0.45 ? 0 : (dmid < 0.30 ? 1 : 2);
+      /* 超级节点（度数 >150 的"人"）连出去的边单独一档压暗，
+         否则 321 条边会从球心射出一根光柱，把整个星云压平 */
+      if(Math.min(NODES[a].d || 0, NODES[bb].d || 0) > 150) bin = 3;
+      buckets[bin].push(k);
+    }
+
+    var ALPHA = [0.055, 0.115, 0.190, 0.030];
+    var LW    = [0.5, 0.7, 0.9, 0.5];
+    var COL   = ['#33496B', '#3E587C', '#4E6D96', '#2A3B54'];
+
+    /* 选中：先把不属于它的边压暗 */
+    var focus = (picked >= 0) ? picked : -1;
+    var focusSet = null;
+    if(focus >= 0){
+      focusSet = new Set([focus]);
+      var nb = adj[focus];
+      for(var q=0;q<nb.length;q++) focusSet.add(nb[q]);
+    }
+
+    ctx.lineCap = 'round';
+    for(var bin2=0;bin2<BUCKET;bin2++){
+      var arr = buckets[bin2];
+      if(!arr.length) continue;
+      ctx.beginPath();
+      for(var m=0;m<arr.length;m++){
+        var link = LINKS[arr[m]];
+        var i1 = link[0], i2 = link[1];
+        var x1 = PX[i1], y1 = PY[i1], x2 = PX[i2], y2 = PY[i2];
+        ctx.moveTo(x1, y1);
+        /* 画成微弧而不是直线：向画面中心偏 14% + 沿法线扭 5%。
+           3800 条纯直线会像线框球，微弧才有丝的感觉。 */
+        var mxp = (x1 + x2) * 0.5, myp = (y1 + y2) * 0.5;
+        /* 往线段「法线」方向鼓，不是往画面中心偏 —— 中心偏对放射状的边等于没弯。
+           鼓的幅度随两端最小度数上升，超级节点那 321 条边才会散成扇形。 */
+        var wgt  = Math.min(1, Math.log2(1 + Math.min(NODES[i1].d || 0, NODES[i2].d || 0)) / 9);
+        var vx = x2 - x1, vy = y2 - y1;
+        var vlen = Math.sqrt(vx * vx + vy * vy) || 1;
+        var amp  = vlen * (0.045 + wgt * 0.20);
+        var cxp = mxp - (vy / vlen) * amp + (CX - mxp) * 0.08;
+        var cyp = myp + (vx / vlen) * amp + (CY - myp) * 0.08;
+        ctx.quadraticCurveTo(cxp, cyp, x2, y2);
+      }
+      ctx.strokeStyle = COL[bin2];
+      ctx.globalAlpha = (focusSet ? ALPHA[bin2] * 0.45 : ALPHA[bin2]);
+      ctx.lineWidth = LW[bin2];
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    /* 高亮选中点的邻接边（叠加一次，亮） */
+    if(focusSet){
+      ctx.beginPath();
+      var fl = adj[focus];
+      for(var r2=0;r2<fl.length;r2++){
+        ctx.moveTo(PX[focus], PY[focus]);
+        ctx.lineTo(PX[fl[r2]], PY[fl[r2]]);
+      }
+      ctx.strokeStyle = '#7FD4FF';
+      ctx.globalAlpha = 0.42;
+      ctx.lineWidth = 0.9;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    /* 点：远的先画 */
+    var order = new Array(NODES.length);
+    for(var o=0;o<NODES.length;o++) order[o] = o;
+    order.sort(function(A, B){ return PZ[B] - PZ[A]; });
+
+    for(var u=0;u<order.length;u++){
+      var idx = order[u];
+      var nd = NODES[idx];
+      var s2 = PS[idx];
+      var deg = nd.d || 0;
+      var rr = (0.7 + Math.log2(1 + deg) * 0.34) * s2;
+      if(rr < 0.35) rr = 0.35;
+
+      var tone = TONE[nd.t] || TONE[2];
+      var dim = 1.0;
+      if(focusSet && !focusSet.has(idx)) dim = 0.28;
+
+      /* 新记忆更亮：a = 多少天前 */
+      var fresh = Math.max(0, 1 - Math.min(1, (nd.a || 0) / 6)) * 0.35;
+      var alpha = Math.min(1, (0.42 + fresh + (deg > 40 ? 0.22 : 0)) * dim * (0.55 + s2 * 0.55));
+
+      /* 用预渲染的径向渐变精灵代替 arc+fill：快一倍，还自带光晕 */
+      var sp = SPRITE[nd.t] || SPRITE[2];
+      var dd = rr * 6.0;
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(sp, PX[idx] - dd * 0.5, PY[idx] - dd * 0.5, dd, dd);
+      ctx.globalAlpha = 1;
+
+      /* 高度数点加十字星芒 */
+      if(deg > 120 && s2 > 0.75 && dim > 0.5){
+        var len = rr * 3.2;
+        ctx.beginPath();
+        ctx.moveTo(PX[idx] - len, PY[idx]); ctx.lineTo(PX[idx] + len, PY[idx]);
+        ctx.moveTo(PX[idx], PY[idx] - len); ctx.lineTo(PX[idx], PY[idx] + len);
+        ctx.strokeStyle = 'rgba(180,205,235,' + (0.24 * dim).toFixed(3) + ')';
+        ctx.lineWidth = 0.7;
+        ctx.stroke();
+      }
+    }
+
+    /* 悬停环 */
+    if(hover >= 0 && hover !== picked){
+      ctx.beginPath();
+      ctx.arc(PX[hover], PY[hover], 7, 0, 6.2832);
+      ctx.strokeStyle = 'rgba(127,212,255,.55)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    if(picked >= 0){
+      ctx.beginPath();
+      ctx.arc(PX[picked], PY[picked], 9, 0, 6.2832);
+      ctx.strokeStyle = 'rgba(127,212,255,.85)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+
+    /* fps */
+    fpsAcc += dt; fpsN++;
+    if(fpsAcc > 500){
+      fpsShow = Math.round(1000 / (fpsAcc / fpsN));
+      hf.textContent = fpsShow;
+      fpsAcc = 0; fpsN = 0;
+    }
+  }
+
+  /* ── 交互 ───────────────────────────────── */
+  var dragging = false, lastX = 0, lastY = 0;
+
+  cv.addEventListener('pointerdown', function(e){
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointerup', function(e){
+    dragging = false;
+    try { cv.releasePointerCapture(e.pointerId); } catch(err){}
+  });
+  cv.addEventListener('pointermove', function(e){
+    var mx = e.clientX, my = e.clientY;
+
+    if(dragging){
+      yaw   += (mx - lastX) * 0.006;
+      pitch += (my - lastY) * 0.005;
+      pitch = Math.max(-1.2, Math.min(1.2, pitch));
+      lastX = mx; lastY = my;
+    }
+
+    /* 视差：鼠标位置轻微推近 */
+    parallax  += ((mx / W - 0.5) * 2 - parallax)  * 0.06;
+    parallaxY += ((my / H - 0.5) * 2 - parallaxY) * 0.06;
+
+    /* 命中测试 */
+    var best = -1, bestD = 15 * 15;
+    for(var i=0;i<NODES.length;i++){
+      var dx = PX[i] - mx, dy = PY[i] - my;
+      var dd = dx*dx + dy*dy;
+      if(dd < bestD){ bestD = dd; best = i; }
+    }
+    hover = best;
+
+    if(best >= 0){
+      var nd = NODES[best];
+      tip.style.opacity = 1;
+      tip.style.left = Math.min(W - 360, mx + 16) + 'px';
+      tip.style.top  = Math.min(H - 120, my + 14) + 'px';
+      tip.textContent = nd.v || '（这条没有原文）';
+      var meta = document.createElement('span');
+      meta.className = 'm';
+      var kind = ({0:'事实',1:'事实',2:'记忆',3:'话题',4:'人'})[nd.t] || '记忆';
+      meta.textContent = kind + ' · 连接 ' + nd.d + ' · ' + (nd.a != null ? nd.a.toFixed(1) + ' 天前' : '');
+      tip.appendChild(meta);
+    } else {
+      tip.style.opacity = 0;
+    }
+  });
+  cv.addEventListener('pointerleave', function(){
+    hover = -1; tip.style.opacity = 0;
+  });
+
+  cv.addEventListener('click', function(e){
+    if(hover >= 0){ picked = (picked === hover) ? -1 : hover; }
+    else { picked = -1; }
+  });
+
+  window.addEventListener('keydown', function(e){
+    if(e.code === 'Space'){ e.preventDefault(); paused = !paused; }
+  });
+
+  window.addEventListener('resize', resize);
+
+  resize();
+  load().then(function(){
+    requestAnimationFrame(frame);
+  }).catch(function(err){
+    hn.textContent = '读不到 memory-graph.json';
+    console.error('[starmap] ' + err.message);
+  });
+})();
+</script>
+</body>
+</html>
