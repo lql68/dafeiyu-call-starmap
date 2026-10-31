@@ -332,7 +332,8 @@
          transform-origin:center center;background:#141920}
 
   /* ── 第一层：暖色房间（虚焦） ──────────────────────────── */
-  .room{position:absolute;inset:0;overflow:hidden;background:
+  .room{position:absolute;inset:0;overflow:hidden;pointer-events:none;   /* 背景层整棵子树不吃点击 */
+    background:
     linear-gradient(180deg,#4A3A28 0%,#382C1E 55%,#231B13 100%)}
   /* 背景：ComfyUI 出的书房（?bg=1|2|3 切换对比）；room.js 那张程序化图留作兜底 */
   #roomBg{position:absolute;inset:0;background-size:cover;background-position:center;
@@ -358,7 +359,7 @@
     background:radial-gradient(ellipse at 62% 34%,
       #F3E4C4 0%, #E0C99E 26%, rgba(190,160,110,.55) 52%, rgba(120,96,64,0) 78%)}
   /* 左下地板反光 */
-  .floor{position:absolute;left:-100px;bottom:-160px;width:1400px;height:620px;
+  .floor{pointer-events:none;position:absolute;left:-100px;bottom:-160px;width:1400px;height:620px;
     filter:blur(74px);opacity:.42;
     background:radial-gradient(ellipse at 40% 60%,
       rgba(196,150,96,.5) 0%, rgba(120,88,54,.28) 46%, rgba(0,0,0,0) 76%)}
@@ -368,7 +369,7 @@
     background:linear-gradient(90deg,rgba(8,7,6,.94) 0%,rgba(8,7,6,.72) 52%,rgba(8,7,6,0) 100%)}
 
   /* ── 第二层：冷雾（把暖房间压成"背景"） ────────────────── */
-  .scrim{position:absolute;inset:0;
+  .scrim{position:absolute;inset:0;pointer-events:none;   /* 冷雾是装饰层，绝不能吃点击 */
     background:
       radial-gradient(ellipse at 44% 42%, rgba(38,45,53,.12) 0%, rgba(24,29,36,.40) 62%, rgba(16,20,26,.66) 100%),
       linear-gradient(180deg, rgba(20,25,32,.50) 0%, rgba(20,25,32,.20) 40%, rgba(16,20,26,.72) 100%)}
@@ -385,6 +386,10 @@
 
   /* ── HUD 通用 ───────────────────────────────────────── */
   .hud{position:absolute;inset:0;pointer-events:none}
+  /* .hud 整体不吃事件（它盖住整页），但里面这些是真要点的，必须显式收回 */
+  .hud .tools,.hud .tabs,.hud .panel,.hud .timeline,
+  .hud .mind,.hud .ctrl,.hud .chatbar,.hud .foot{pointer-events:auto}
+  .hud .col,.hud .stats,.hud .cap,.hud .frag,.hud .hint{pointer-events:none}
   .mono{font-family:var(--mono);font-size:12px;letter-spacing:.09em;
         text-transform:uppercase;color:var(--ink-2)}
   .num{font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--ink)}
