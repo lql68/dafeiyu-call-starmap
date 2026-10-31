@@ -460,7 +460,8 @@
   .mind .cap b{color:var(--ink-2);font-weight:400}
 
   /* 全屏星图 */
-  #starFull{position:fixed;inset:0;z-index:60;display:none;background:#05070c}
+  #starFull{position:fixed;inset:0;z-index:60;display:none;pointer-events:auto;
+    background:#05070c}
   #starFull.on{display:block}
   #starFull iframe{width:100%;height:100%;border:0;display:block;
     opacity:0;transition:opacity .5s ease-out}
@@ -657,10 +658,6 @@
       <div class="cap">记忆节点 <b id="mNode">—</b> · 连线 <b id="mEdge">—</b></div>
     </div>
 
-    <div id="starFull" aria-hidden="true">
-      <button id="starBack" title="回到通话（Esc）"><i>←</i> 回到通话</button>
-      <iframe id="starFrame" src="about:blank" title="记忆星图"></iframe>
-    </div>
 
     <div class="sub">
       <div class="cn" id="subText"></div>
@@ -729,6 +726,11 @@
     <button id="gateBtn">接 通</button>
   </div>
 </div>
+<div id="starFull" aria-hidden="true">
+  <button id="starBack" title="回到通话（Esc）"><i>←</i> 回到通话</button>
+  <iframe id="starFrame" src="about:blank" title="记忆星图"></iframe>
+</div>
+
 <script src="live2d/lib/live2dcubismcore.min.js"></script>
 <script src="live2d/lib/pixi.min.js"></script>
 <script src="live2d/lib/cubism4.min.js"></script>
@@ -2260,5 +2262,6 @@ setInterval(renderClock, 1000); renderClock();
   load();
 })();
 </script>
+
 </body>
 </html>
