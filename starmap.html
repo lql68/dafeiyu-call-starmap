@@ -123,6 +123,7 @@
   var PX, PY, PS, PZ;         // 每帧投影缓存
   var adj = [];               // 邻接表：选中时用
   var LAYER = [];             // 每个节点属于哪一层
+  var LINK_ORDER = null;      // 边的索引，按权重从大到小排好
   var DENS  = null;           // 每个节点的半径系数（球壳厚度）
   var LENSED = null;          // 每个节点被引力透镜放大的程度（0~1）
   var BHR = 0;                // 中央黑洞视界半径（frame 每帧算）
@@ -172,6 +173,12 @@
         LAYER = new Array(n);
         DENS  = new Float32Array(n);
         LENSED = new Float32Array(n);
+
+        /* 放大后每条边的屏幕长度成倍增长，光栅化面积是平方级上去的。
+           所以先把边按权重排好，缩放越大只画越少 —— 留下的是关系最强的那批。 */
+        LINK_ORDER = new Array(LINKS.length);
+        for(var li = 0; li < LINKS.length; li++) LINK_ORDER[li] = li;
+        LINK_ORDER.sort(function(A, B){ return (LINKS[B][2] || 0) - (LINKS[A][2] || 0); });
         for(var q = 0; q < n; q++){
           LAYER[q] = layerOf(NODES[q]);
           /* 确定性伪随机（sin 哈希）：让点不在同一层球壳上，
@@ -290,6 +297,7 @@
       var ndn = NODES[nb];
       if((ndn.d || 0) < 10) continue;          /* 只留有分量的話題：既省时间又不糊 */
       nebN++;
+      if(PX[nb] < -160 || PX[nb] > W + 160 || PY[nb] < -160 || PY[nb] > H + 160) continue;
       var nr = Math.min(118, 26 + Math.log2(1 + ndn.d) * 13) * PS[nb];
       var na = 0.105 * Math.max(0.25, PS[nb]);
       if(focusSet && focusSet.indexOf(nb) < 0) na *= 0.3;
@@ -306,11 +314,21 @@
     /* 线：按深度分档，每档一次 beginPath */
     var buckets = [];
     for(var b=0;b<BUCKET;b++) buckets.push([]);
+    /* 缩放越大，只画权重最高的那批边 */
+    var keepRatio = zoom <= 1.05 ? 1.0
+                  : zoom <= 1.55 ? 0.60
+                  : zoom <= 2.10 ? 0.34
+                  : zoom <= 2.60 ? 0.20 : 0.12;
+    var edgeLimit = Math.floor(LINKS.length * keepRatio);
     var lstep = light ? 3 : 1;                  /* 拖动时每 3 条画 1 条 */
-    for(var k=0;k<LINKS.length;k+=lstep){
-      var l = LINKS[k];
+    var MARGIN = 90;
+    for(var k=0;k<edgeLimit;k+=lstep){
+      var l = LINKS[LINK_ORDER ? LINK_ORDER[k] : k];
       var a = l[0], bb = l[1];
       if(a >= NODES.length || bb >= NODES.length) continue;
+      /* 两端都在屏幕外就不画（放大后大部分边都在视野外） */
+      if((PX[a] < -MARGIN && PX[bb] < -MARGIN) || (PX[a] > W + MARGIN && PX[bb] > W + MARGIN)) continue;
+      if((PY[a] < -MARGIN && PY[bb] < -MARGIN) || (PY[a] > H + MARGIN && PY[bb] > H + MARGIN)) continue;
       var dmid = (PZ[a] + PZ[bb]) * 0.5;
       var bin = dmid < -0.45 ? 0 : (dmid < 0.30 ? 1 : 2);
       /* 超级节点（度数 >150 的"人"）连出去的边单独一档压暗，
@@ -389,6 +407,10 @@
       var deg = nd.d || 0;
       var lay = LAYER[idx];
 
+      /* 视锥剔除：放大到 2 倍以上时，屏幕上只剩大约九分之一的点，
+         剩下八分之七原先都在白画精灵 */
+      if(PX[idx] < -60 || PX[idx] > W + 60 || PY[idx] < -60 || PY[idx] > H + 60) continue;
+
       var dim = 1.0;
       if(focusSet && focusSet.indexOf(idx) < 0) dim = 0.26;
 
@@ -447,6 +469,7 @@
        中央那个巨黑洞是唯一的黑洞，这些枢纽挂在它周围的球面上当"环上最亮的星" ── */
     for(var h = 0; h < NODES.length; h++){
       if(LAYER[h] !== 'hole') continue;
+      if(PX[h] < -120 || PX[h] > W + 120 || PY[h] < -120 || PY[h] > H + 120) continue;
       var rh = (2.6 + Math.log2(1 + (NODES[h].d || 0)) * 0.8) * PS[h];
       var dimh = (focusSet && focusSet.indexOf(h) < 0) ? 0.34 : 1.0;
 
@@ -560,7 +583,10 @@
 
   /* ── 交互 ───────────────────────────────── */
   var dragging = false, lastX = 0, lastY = 0;
-  var zoom = 1.0;              /* 滚轮缩放 */
+  var zoom = (function(){
+    var m = location.search.match(/[?&]zoom=([0-9.]+)/);
+    return m ? Math.max(0.32, Math.min(3.2, parseFloat(m[1]))) : 1.0;
+  })();                        /* 滚轮缩放，?zoom= 可指定初始值 */
   var lastInteract = 0;        /* 最后一次拖动/缩放的时刻，用来在交互期间降质 */
 
   cv.addEventListener('wheel', function(e){
