@@ -1,0 +1,37 @@
+# 二进制/大体积不进仓库
+__pycache__/
+*.pyc
+
+# 模型与素材（各自有来源，不进 git）
+live2d/model/
+live2d/lib/
+checkpoints/
+
+# 运行时产物
+vision/snapshot.jpg
+vision/latest.jpg
+vision/*.log
+tts/voice/
+tts/sep/
+tts/diag/
+tts/compare/
+tts/out/
+obs/frames/
+obs/*.png
+*.log
+*.err.log
+state-vision.json
+say.txt
+
+# 临时
+.tmp/
+vts_token.json
+
+# 根目录截图/录屏（验收产物，不进仓库）
+/*.png
+/*.mp4
+/*.jpg
+# OBS 与调试截图目录
+obs/
+# 大参考音频
+tts/refs/cover_full.wav

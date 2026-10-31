@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>pixi7 + l2d 0.5.0-beta 黑块复测</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1622;overflow:hidden}
+  #c{display:block;width:100%;height:100%}
+  #err{position:fixed;left:8px;top:8px;color:#f88;font:13px monospace;white-space:pre-wrap;max-width:95%}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="err"></div>
+<script src="lib/live2dcubismcore.min.js"></script>
+<script src="lib/pixi7.min.js"></script>
+<script src="lib/cubism4_05.min.js"></script>
+<script>
+const ERR = document.getElementById('err');
+window.onerror = (m, s, l) => { ERR.textContent += 'JS: ' + m + ' @' + l + '\n'; };
+window.addEventListener('unhandledrejection', e => { ERR.textContent += 'Promise: ' + e.reason + '\n'; });
+ERR.textContent += 'pixi ' + PIXI.VERSION + ' / 键: ' + Object.keys(PIXI.live2d || {}).join(',') + '\\n';
+(async () => {
+  const app = new PIXI.Application({
+    view: document.getElementById('c'), backgroundAlpha: 0,
+    autoDensity: true, resolution: Math.min(2, devicePixelRatio || 1), antialias: true,
+  });
+  const m = await PIXI.live2d.Live2DModel.from('model/大肥鱼/大肥鱼.model3.json',
+    { autoInteract: false, idleMotionGroup: 'Idle' });
+  app.stage.addChild(m);
+  const fit = () => {
+    const s = Math.min(app.renderer.width / m.internalModel.originalWidth, 1);
+    app.stage.scale.set(app.renderer.screen.width / m.internalModel.originalWidth * 1.0);
+    m.x = app.renderer.screen.width / 2;
+    m.y = app.renderer.screen.height * 0.5;
+    m.anchor.set(0.5, 0.5);
+    ERR.textContent += 'model ok, 参数 ' + m.internalModel.coreModel.getParameterCount() + '\n';
+    window.__ok = true;
+  };
+  await m.internalModel.motionManager.startRandomMotion('Idle');
+  fit();
+  window.addEventListener('resize', fit);
+})().catch(e => { ERR.textContent += 'boot: ' + (e && e.message || e) + '\n'; });
+</script>
+</body>
+</html>

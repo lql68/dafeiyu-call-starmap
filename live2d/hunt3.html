@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>大肥鱼 黑块溯源 v4</title>
+<style>html,body{margin:0;background:#0b1220;color:#cfe6f5;font:12px/1.4 ui-monospace,monospace}
+#c{position:absolute;left:-3000px}#out{position:absolute;inset:0;padding:10px;white-space:pre}</style>
+</head>
+<body>
+<div id="out">…</div><canvas id="c"></canvas>
+<script src="lib/live2dcubismcore.min.js"></script>
+<script src="lib/pixi.min.js"></script>
+<script src="lib/cubism4.min.js"></script>
+<script>
+const out = s => { document.getElementById('out').textContent = s; };
+window.onerror = (m, s, l) => out('JS 错误: ' + m + ' @' + l);
+(async () => {
+  try {
+    const CW = 400, CH = 800;
+    const app = new PIXI.Application({view: document.getElementById('c'), width: CW, height: CH,
+      backgroundAlpha: 0, antialias: false, resolution: 1});
+    const model = await PIXI.live2d.Live2DModel.from('model/大肥鱼/大肥鱼.model3.json', {autoInteract: false});
+    app.stage.addChild(model);
+    app.ticker.stop();
+
+    const im = model.internalModel;
+    const sc = CH / (im.originalHeight * 0.42);
+    model.scale.set(sc);
+    model.x = (CW - im.originalWidth * sc) / 2;
+    model.y = 0;
+    const mm = im.coreModel, mo = mm._model;
+    const d = mo.drawables, parts = mo.parts;
+    const W = mo.canvasinfo.CanvasWidth, H = mo.canvasinfo.CanvasHeight;
+
+    for (let k = 0; k < 8; k++) { model.update(1 / 60); app.renderer.render(app.stage); }
+
+    // 屏幕(199,159) → 模型归一化坐标
+    const gl = app.renderer.gl;
+    const px = new Uint8Array(4);
+    let found = null;
+    const rows = [];
+    for (let i = 0; i < mm.getDrawableCount(); i++) {
+      const vc = d.vertexCounts[i], vp = d.vertexPositions[i];
+      if (!vc || !vp || vp.length < 8) continue;
+      let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+      for (let k = 0; k < vc; k++) {
+        const x = vp[k * 2], y = vp[k * 2 + 1];
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+      const area = ((x1 - x0) / W) * ((y1 - y0) / H);
+      rows.push({i, nx0: x0 / W, nx1: x1 / W, ny0: y0 / H, ny1: y1 / H, area,
+        op: d.opacities[i], pp: d.parentPartIndices[i], id: d.ids[i]});
+    }
+    rows.sort((a, b) => a.area - b.area);
+    const lines = ['drawables=' + rows.length];
+    for (const r of rows.slice(0, 18)) {
+      const pid = r.pp >= 0 ? parts.ids[r.pp] : '-';
+      lines.push(`#${String(r.i).padStart(3)} ${r.id.padEnd(14)} area=${r.area.toFixed(5)} op=${r.op.toFixed(2)}`
+        + ` x[${r.nx0.toFixed(3)},${r.nx1.toFixed(3)}] y[${r.ny0.toFixed(3)},${r.ny1.toFixed(3)}] ${pid}`);
+    }
+    // 黑块在模型里的位置：屏幕 199,159（400x800，scale 上面算的）
+    const mx = (199 - model.x) / sc, my = (159 - model.y) / sc;
+    lines.push(`黑块模型坐标 (${Math.round(mx)},${Math.round(my)}) = 归一 (${(mx / W).toFixed(3)},${(my / H).toFixed(3)})`);
+    lines.push('--- 含该点且面积<6% 的 drawable ---');
+    for (const r of rows) {
+      if (r.area > 0.06) continue;
+      if (mx / W < r.nx0 || mx / W > r.nx1 || my / H < r.ny0 || my / H > r.ny1) continue;
+      const pid = r.pp >= 0 ? parts.ids[r.pp] : '-';
+      lines.push(`#${String(r.i).padStart(3)} ${r.id.padEnd(14)} area=${r.area.toFixed(5)} op=${r.op.toFixed(2)} ${pid}`);
+    }
+    out(lines.join('\n'));
+    document.title = 'done';
+  } catch (e) {
+    out('失败: ' + (e && e.stack ? e.stack.slice(0, 800) : e));
+  }
+})();
+</script>
+</body>
+</html>

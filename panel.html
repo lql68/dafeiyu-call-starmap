@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AI 直播间面板</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1920px; height:1080px; background:transparent; overflow:hidden;
+    font-family:"Microsoft YaHei","PingFang SC",sans-serif; color:#eef2ff; }
+  /* 中间 80~720 留空：让下层 OBS 游戏源透出来 */
+  #stage { position:absolute; inset:0; }
+
+  /* ── 顶部状态条 ───────────────────────────── */
+  #topbar { position:absolute; left:0; top:0; width:1920px; height:78px;
+    display:flex; align-items:center; gap:14px; padding:0 22px;
+    background:linear-gradient(180deg, rgba(6,10,26,.92), rgba(6,10,26,0)); }
+  .live { display:flex; align-items:center; gap:8px; padding:5px 14px 5px 10px;
+    border-radius:8px; background:#ff2d55; font-size:22px; font-weight:700;
+    box-shadow:0 0 18px rgba(255,45,85,.55); }
+  .live i { width:11px; height:11px; border-radius:50%; background:#fff;
+    animation:blink 1.1s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+  .who { display:flex; align-items:center; gap:10px; }
+  .pfp { width:52px; height:52px; border-radius:50%; border:2px solid #6ea8ff;
+    background:linear-gradient(140deg,#4a7dff,#9b6bff); display:flex;
+    align-items:center; justify-content:center; font-size:24px; }
+  .name { font-size:27px; font-weight:700; letter-spacing:.5px; }
+  .sub { font-size:15px; color:#9fb0d0; margin-top:2px; }
+  .views { margin-left:auto; display:flex; align-items:center; gap:22px; font-size:19px; color:#cfe0ff; }
+  .views b { color:#fff; font-size:23px; }
+
+  /* ── 左上：TOKEN 余额卡 ───────────────────── */
+  #token { position:absolute; left:22px; top:92px; width:300px; padding:14px 16px;
+    border-radius:14px; background:rgba(8,12,30,.88);
+    border:1px solid rgba(110,168,255,.35); box-shadow:0 10px 34px rgba(0,0,0,.5); }
+  #token .h { font-size:15px; color:#8fa6cc; letter-spacing:2px; }
+  #token .v { font-size:40px; font-weight:800; color:#ffd166; line-height:1.15; margin-top:2px; }
+  #token .v small { font-size:20px; color:#ffd166; opacity:.8; }
+  #token .m { font-size:14px; color:#9fb0d0; margin-top:6px; display:flex; justify-content:space-between; }
+  #token .m b { color:#7ee2a8; }
+
+  /* ── 右上：游戏状态卡 ─────────────────────── */
+  #game { position:absolute; right:22px; top:92px; width:430px; padding:13px 16px;
+    border-radius:14px; background:rgba(8,12,30,.88);
+    border:1px solid rgba(110,168,255,.35); box-shadow:0 10px 34px rgba(0,0,0,.5); }
+  #game .h { display:flex; align-items:center; gap:8px; font-size:20px; font-weight:700; }
+  #game .h em { font-style:normal; width:9px; height:9px; border-radius:50%;
+    background:#7ee2a8; box-shadow:0 0 10px #7ee2a8; }
+  #game .r { display:flex; gap:10px; margin-top:9px; font-size:15px; color:#cfe0ff; }
+  #game .r span { padding:4px 10px; border-radius:7px; background:rgba(110,168,255,.15);
+    border:1px solid rgba(110,168,255,.25); }
+  #game .last { font-size:14px; color:#8fa6cc; margin-top:8px; }
+
+  /* ── 底部面板（720 以下） ─────────────────── */
+  #dock { position:absolute; left:0; top:720px; width:1920px; height:360px;
+    background:linear-gradient(180deg, rgba(6,10,26,.96), rgba(4,7,18,.99));
+    border-top:1px solid rgba(110,168,255,.22); display:flex; gap:16px; padding:16px 20px; }
+
+  /* AI 回复 */
+  #ai { width:600px; display:flex; flex-direction:column;
+    background:linear-gradient(160deg, rgba(58,96,200,.30), rgba(20,30,70,.55));
+    border:1px solid rgba(120,170,255,.35); border-radius:16px; padding:14px 16px; }
+  #ai .tag { display:flex; align-items:center; gap:8px; font-size:15px; color:#9ec2ff; }
+  #ai .tag b { padding:2px 8px; border-radius:6px; background:rgba(110,168,255,.22); font-weight:600; }
+  #ai .tag .right { margin-left:auto; color:#7f92b4; font-size:13px; }
+  #ai .row { display:flex; gap:14px; margin-top:10px; align-items:flex-start; }
+  #ai .face { width:96px; height:96px; border-radius:16px; flex:0 0 auto;
+    background:linear-gradient(150deg,#3f6fe0,#9b6bff); display:flex;
+    align-items:center; justify-content:center; font-size:44px;
+    border:2px solid rgba(160,200,255,.5); box-shadow:0 0 24px rgba(80,130,255,.5); }
+  #ai .line { font-size:31px; line-height:1.35; font-weight:700; color:#fff;
+    text-shadow:0 2px 14px rgba(0,0,0,.7); }
+
+  /* 实时弹幕 */
+  #danmu { flex:1; display:flex; flex-direction:column;
+    background:rgba(12,18,40,.72); border:1px solid rgba(110,168,255,.22);
+    border-radius:16px; padding:12px 16px; overflow:hidden; }
+  #danmu .hd { font-size:15px; color:#8fa6cc; letter-spacing:1px; display:flex; }
+  #danmu .hd .n { margin-left:auto; color:#5f7398; font-size:13px; }
+  #danmu ul { list-style:none; margin-top:10px; display:flex; flex-direction:column; gap:9px; }
+  #danmu li { font-size:20px; line-height:1.25; color:#dfe9ff;
+    animation:slide .45s ease-out; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #danmu li u { text-decoration:none; color:#7ee2a8; margin-right:8px; }
+  #danmu li.gift u { color:#ffd166; }
+  @keyframes slide { from{opacity:0; transform:translateY(14px)} to{opacity:1; transform:none} }
+
+  /* 点歌台 */
+  #songs { width:520px; display:flex; flex-direction:column;
+    background:rgba(12,18,40,.72); border:1px solid rgba(110,168,255,.22);
+    border-radius:16px; padding:12px 16px; overflow:hidden; }
+  #songs .hd { font-size:15px; color:#8fa6cc; display:flex; align-items:center; }
+  #songs .hd .n { margin-left:auto; color:#5f7398; font-size:13px; }
+  #songs ul { list-style:none; margin-top:9px; display:flex; flex-direction:column; gap:6px; }
+  #songs li { display:flex; align-items:center; gap:10px; font-size:18px; color:#cfe0ff;
+    padding:6px 10px; border-radius:9px; background:rgba(110,168,255,.07); }
+  #songs li.now { background:linear-gradient(90deg, rgba(110,168,255,.32), rgba(110,168,255,.08));
+    color:#fff; font-weight:700; }
+  #songs li i { width:22px; height:22px; border-radius:6px; background:rgba(110,168,255,.3);
+    display:flex; align-items:center; justify-content:center; font-size:13px; font-style:normal; }
+  #songs li.now i { background:#6ea8ff; color:#08122b; }
+  #songs li .st { margin-left:auto; font-size:13px; color:#8fa6cc; }
+  #songs li.now .st { color:#a8ffd0; }
+
+  /* 底部署名 */
+  #foot { position:absolute; left:0; bottom:0; width:1920px; height:30px;
+    display:flex; align-items:center; justify-content:center; gap:16px;
+    font-size:13px; color:#5f7398; background:rgba(3,5,12,.9); }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <div id="topbar">
+    <div class="live"><i></i>LIVE</div>
+    <div class="who">
+      <div class="pfp" id="pfp">🐟</div>
+      <div>
+        <div class="name" id="s-name">蓝色小肥鱼（AI版）</div>
+        <div class="sub" id="s-sub">主播 · AI 自动游玩 · 弹幕实时驱动</div>
+      </div>
+    </div>
+    <div class="views">
+      <div>👁 <b id="s-views">0</b> 在线</div>
+      <div>⏱ <b id="s-uptime">00:00:00</b> 开播</div>
+    </div>
+  </div>
+
+  <div id="token">
+    <div class="h">TOKEN 余额</div>
+    <div class="v"><small>¥</small><span id="t-bal">0.00</span></div>
+    <div class="m"><span>本轮已赚 <b id="t-earn">¥0.00</b></span><span id="t-note">等待唱演</span></div>
+  </div>
+
+  <div id="game">
+    <div class="h"><em></em><span id="g-title">泰拉瑞亚</span> · <span id="g-status">游戏运行中</span></div>
+    <div class="r">
+      <span id="g-a">关卡 —</span><span id="g-b">进度 —</span><span id="g-c">—</span>
+    </div>
+    <div class="last" id="g-last">最后动作：—</div>
+  </div>
+
+  <div id="dock">
+    <div id="ai">
+      <div class="tag"><b>AI 回复</b><span id="a-mode">看画面即答</span>
+        <span class="right">已生成 · <span id="a-ts">刚刚</span></span></div>
+      <div class="row">
+        <div class="face" id="a-face">🐟</div>
+        <div class="line" id="a-line">……</div>
+      </div>
+    </div>
+
+    <div id="danmu">
+      <div class="hd"><span>实时弹幕</span><span class="n">最新 <span id="d-n">0</span> 条 · 自动滚动</span></div>
+      <ul id="d-list"></ul>
+    </div>
+
+    <div id="songs">
+      <div class="hd"><span>点歌台</span><span class="n"><span id="s-queue">0</span> 首排队</span></div>
+      <ul id="song-list"></ul>
+    </div>
+  </div>
+
+  <div id="foot">
+    <span>AI 生成内容 · 30 字内回复 · 免费/假礼物自动免疫</span>
+    <span>·</span>
+    <span id="f-link">实时数据已连接</span>
+  </div>
+</div>
+
+<script>
+const API = 'http://127.0.0.1:8765';
+let last = {};
+const $ = id => document.getElementById(id);
+
+function fmtUptime(sec){
+  sec = Math.max(0, Math.floor(sec));
+  const h = String(Math.floor(sec/3600)).padStart(2,'0');
+  const m = String(Math.floor(sec%3600/60)).padStart(2,'0');
+  const s = String(sec%60).padStart(2,'0');
+  return `${h}:${m}:${s}`;
+}
+
+function render(st){
+  last = st;
+  $('s-name').textContent = st.streamer || 'AI 主播';
+  $('s-sub').textContent  = st.sub || '';
+  $('s-views').textContent = (st.viewers||0).toLocaleString();
+  $('s-uptime').textContent = fmtUptime(st.uptimeSec||0);
+
+  const t = st.token||{};
+  $('t-bal').textContent  = (t.balance||0).toFixed(2);
+  $('t-earn').textContent = '¥' + (t.earned||0).toFixed(2);
+  $('t-note').textContent = t.note || '';
+
+  const g = st.game||{};
+  $('g-title').textContent  = g.title || '—';
+  $('g-status').textContent = g.status || '—';
+  $('g-a').textContent = g.a || '—';
+  $('g-b').textContent = g.b || '—';
+  $('g-c').textContent = g.c || '—';
+  $('g-last').textContent = '最后动作：' + (g.last || '—');
+
+  const a = st.ai||{};
+  $('a-line').textContent = a.line || '……';
+  $('a-ts').textContent   = a.ts || '刚刚';
+  if (a.face) $('a-face').textContent = a.face;
+
+  const dm = st.danmaku||[];
+  $('d-n').textContent = dm.length;
+  const ul = $('d-list');
+  const shown = dm.slice(-6).map(d =>
+    `<li class="${d.gift?'gift':''}"><u>${esc(d.user)}</u>${esc(d.text)}</li>`).join('');
+  if (ul.dataset.sig !== shown){
+    ul.dataset.sig = shown;
+    ul.innerHTML = shown;
+  }
+
+  const sg = st.songs||[];
+  $('s-queue').textContent = sg.length;
+  $('song-list').innerHTML = sg.slice(0,5).map((s,i) =>
+    `<li class="${i===0?'now':''}"><i>${i===0?'▶':i+1}</i>${esc(s.user)}《${esc(s.title)}》<span class="st">${esc(s.state||'排队中')}</span></li>`
+  ).join('');
+
+  $('f-link').textContent = st.link || '实时数据已连接';
+}
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function tick(){
+  try {
+    const r = await fetch(API + '/state', {cache:'no-store'});
+    render(await r.json());
+  } catch(e) {
+    $('f-link').textContent = '状态服务未启动（node bridge.js）';
+  }
+}
+tick();
+setInterval(tick, 800);
+</script>
+</body>
+</html>

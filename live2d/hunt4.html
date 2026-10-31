@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>大肥鱼 黑块溯源 v5</title>
+<style>html,body{margin:0;background:#0b1220;color:#cfe6f5;font:12px/1.4 ui-monospace,monospace}
+#c{position:absolute;left:-3000px}#out{position:absolute;inset:0;padding:10px;white-space:pre}</style>
+</head>
+<body>
+<div id="out">…</div><canvas id="c"></canvas>
+<script src="lib/live2dcubismcore.min.js"></script>
+<script src="lib/pixi.min.js"></script>
+<script src="lib/cubism4.min.js"></script>
+<script>
+const out = s => { document.getElementById('out').textContent = s; };
+window.onerror = (m, s, l) => out('JS 错误: ' + m + ' @' + l);
+(async () => {
+  try {
+    const CW = 400, CH = 800;
+    const app = new PIXI.Application({view: document.getElementById('c'), width: CW, height: CH,
+      backgroundAlpha: 0, antialias: false, resolution: 1});
+    const model = await PIXI.live2d.Live2DModel.from('model/大肥鱼/大肥鱼.model3.json', {autoInteract: false});
+    app.stage.addChild(model);
+    app.ticker.stop();
+
+    const im = model.internalModel;
+    const sc = CH / (im.originalHeight * 0.42);
+    model.scale.set(sc);
+    model.x = (CW - im.originalWidth * sc) / 2;
+    model.y = 0;
+    const mm = im.coreModel, mo = mm._model;
+    const d = mo.drawables, parts = mo.parts;
+    const gl = app.renderer.gl;
+    const px = new Uint8Array(4);
+
+    /* 关键：必须 update 之后再改不透明度，再 render。
+       先改后 update 会被参数求值覆盖 —— 之前两次溯源就是因为这个全空。 */
+    const frameWith = (mut) => { model.update(1 / 60); if (mut) mut(); app.renderer.render(app.stage); };
+    const readAt = (x, y) => { gl.readPixels(x, CH - 1 - y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); return [px[0], px[1], px[2], px[3]]; };
+    const lum = (p) => 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2];
+
+    for (let k = 0; k < 8; k++) frameWith();
+    model.expression('默认体型');
+    frameWith();
+
+    // 找「近黑 + 四邻 14px 亮」的点
+    const full = new Uint8Array(CW * CH * 4);
+    gl.readPixels(0, 0, CW, CH, gl.RGBA, gl.UNSIGNED_BYTE, full);
+    const L = (x, y) => (x < 0 || y < 0 || x >= CW || y >= CH) ? 0 : (0.299 * full[(y * CW + x) * 4] + 0.587 * full[(y * CW + x) * 4 + 1] + 0.114 * full[(y * CW + x) * 4 + 2]);
+    let box = null;
+    for (let y = Math.round(CH * 0.12); y < Math.round(CH * 0.50) && !box; y++) {
+      for (let x = Math.round(CW * 0.30); x < Math.round(CW * 0.70); x++) {
+        if (full[(y * CW + x) * 4 + 3] < 250) continue;
+        if (L(x, y) > 45) continue;
+        if ([L(x - 14, y), L(x + 14, y), L(x, y - 14), L(x, y + 14)].every(v => v > 150)) { box = {x, y}; break; }
+      }
+    }
+    if (!box) { out('没找到黑块'); return; }
+
+    const lines = ['黑块 @' + box.x + ',' + box.y];
+    const isDark = () => lum(readAt(box.x, box.y)) < 60;
+
+    let hitD = -1;
+    for (let i = 0; i < mm.getDrawableCount(); i++) {
+      frameWith(() => { d.opacities[i] = 0; });
+      if (!isDark()) { hitD = i; break; }
+    }
+    frameWith();
+    if (hitD >= 0) {
+      const pp = d.parentPartIndices[hitD];
+      lines.push('drawable #' + hitD + ' id=' + d.ids[hitD] + ' part=' + (pp >= 0 ? parts.ids[pp] : '-')
+        + ' flags=' + d.constantFlags[hitD]);
+    } else {
+      lines.push('715 个 drawable 逐个关掉，暗块都还在 → 不是单个 drawable');
+      // 再按 Part 试一遍（update 之后改才有意义）
+      let hitP = -1;
+      for (let pi = 0; pi < parts.ids.length; pi++) {
+        frameWith(() => { parts.opacities[pi] = 0; });
+        if (!isDark()) { hitP = pi; break; }
+      }
+      frameWith();
+      if (hitP >= 0) lines.push('Part #' + hitP + ' id=' + parts.ids[hitP]);
+      else lines.push('Part 也不行');
+    }
+    out(lines.join('\n'));
+    document.title = 'done';
+  } catch (e) {
+    out('失败: ' + (e && e.stack ? e.stack.slice(0, 800) : e));
+  }
+})();
+</script>
+</body>
+</html>

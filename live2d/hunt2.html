@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>大肥鱼 黑块溯源 v3</title>
+<style>html,body{margin:0;background:#0b1220;color:#cfe6f5;font:12px/1.4 ui-monospace,monospace}
+#c{position:absolute;left:-3000px}#out{position:absolute;inset:0;padding:10px;white-space:pre}</style>
+</head>
+<body>
+<div id="out">…</div><canvas id="c"></canvas>
+<script src="lib/live2dcubismcore.min.js"></script>
+<script src="lib/pixi.min.js"></script>
+<script src="lib/cubism4.min.js"></script>
+<script>
+const out = s => { document.getElementById('out').textContent = s; };
+window.onerror = (m, s, l) => out('JS 错误: ' + m + ' @' + l);
+(async () => {
+  try {
+    const CW = 400, CH = 800;
+    const app = new PIXI.Application({view: document.getElementById('c'), width: CW, height: CH,
+      backgroundAlpha: 0, antialias: false, resolution: 1});
+    const model = await PIXI.live2d.Live2DModel.from('model/大肥鱼/大肥鱼.model3.json', {autoInteract: false});
+    app.stage.addChild(model);
+    app.ticker.stop();
+
+    const im = model.internalModel;
+    const s = CH / (im.originalHeight * 0.42);
+    model.scale.set(s);
+    model.x = (CW - im.originalWidth * s) / 2;
+    model.y = 0;
+
+    const gl = app.renderer.gl;
+    const mm = im.coreModel, mo = mm._model, parts = mo.parts;
+    const frame = () => { model.update(1 / 60); app.renderer.render(app.stage); };
+
+    // 读一小块
+    const grabWin = (cx, cy, r) => {
+      const w = r * 2 + 1, h = r * 2 + 1;
+      const buf = new Uint8Array(w * h * 4);
+      gl.readPixels(Math.round(cx - r), CH - 1 - Math.round(cy + r), w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      return buf;
+    };
+    const lumAt = (buf, w, x, y) => {
+      const i = (y * w + x) * 4;
+      return 0.299 * buf[i] + 0.587 * buf[i + 1] + 0.114 * buf[i + 2];
+    };
+
+    for (let k = 0; k < 6; k++) frame();
+    model.expression('默认体型');
+    frame();
+
+    // 找「四周是亮肤色、自己是近黑」的小块 —— 那就是贴在脸上的黑方块
+    const full = new Uint8Array(CW * CH * 4);
+    gl.readPixels(0, 0, CW, CH, gl.RGBA, gl.UNSIGNED_BYTE, full);
+    const fat = (x, y, w) => (x < 0 || y < 0 || x >= w || y >= CH) ? 0 : (0.299 * full[(y * w + x) * 4] + 0.587 * full[(y * w + x) * 4 + 1] + 0.114 * full[(y * w + x) * 4 + 2]);
+    let box = null;
+    for (let y = Math.round(CH * 0.12); y < Math.round(CH * 0.50); y++) {
+      for (let x = Math.round(CW * 0.32); x < Math.round(CW * 0.68); x++) {
+        const a = full[(y * CW + x) * 4 + 3];
+        if (a < 250) continue;
+        if (fat(x, y, CW) > 45) continue;
+        // 四个方向 14px 外是否都亮（肤色）
+        const ring = [fat(x - 14, y, CW), fat(x + 14, y, CW), fat(x, y - 14, CW), fat(x, y + 14, CW)];
+        if (ring.every(v => v > 150)) { box = {x, y}; break; }
+      }
+      if (box) break;
+    }
+    if (!box) { out('没自动找到黑块（换个判据）'); return; }
+
+    const R = 26;
+    const baseWin = grabWin(box.x, box.y, R);
+    const W2 = R * 2 + 1;
+    const dWin = (buf) => {
+      let d = 0;
+      for (let i = 0; i < buf.length; i += 4) {
+        d += Math.abs(buf[i] - baseWin[i]) + Math.abs(buf[i + 1] - baseWin[i + 1]) + Math.abs(buf[i + 2] - baseWin[i + 2]);
+      }
+      return d / (buf.length / 4);
+    };
+
+    const rows = [];
+    for (let pi = 0; pi < parts.ids.length; pi++) {
+      const keep = parts.opacities[pi];
+      parts.opacities[pi] = 0;
+      frame();
+      const dd = dWin(grabWin(box.x, box.y, R));
+      parts.opacities[pi] = keep;
+      if (dd > 1) rows.push({pi, id: parts.ids[pi], d: +dd.toFixed(1)});
+    }
+    rows.sort((a, b) => b.d - a.d);
+    const lines = ['黑块 @' + box.x + ',' + box.y + '  候选 Part ' + rows.length];
+    for (const r of rows.slice(0, 12)) lines.push(`Part#${String(r.pi).padStart(3)} ${r.id.padEnd(10)} diff=${r.d}`);
+    out(lines.join('\n'));
+    document.title = 'done';
+  } catch (e) {
+    out('失败: ' + (e && e.stack ? e.stack.slice(0, 800) : e));
+  }
+})();
+</script>
+</body>
+</html>

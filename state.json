@@ -1,0 +1,69 @@
+{
+  "streamer": "小肥鱼（AI版）",
+  "sub": "主播 · AI 自动游玩 · 弹幕实时驱动",
+  "viewers": 1475,
+  "uptimeSec": 86884,
+  "link": "实时数据已连接",
+  "token": {
+    "balance": 173.53,
+    "earned": 37.75,
+    "note": "等待唱演"
+  },
+  "game": {
+    "title": "泰拉瑞亚",
+    "status": "游戏运行中",
+    "a": "第 1 天",
+    "b": "地表",
+    "c": "100 HP",
+    "last": "砍倒一棵树"
+  },
+  "ai": {
+    "face": "🐟",
+    "line": "树倒了，木材在手，接下来挖个地下室躲夜怪。",
+    "ts": "刚刚"
+  },
+  "danmaku": [
+    {
+      "user": "斜风僵",
+      "text": "可以再砍一棵吗",
+      "gift": false
+    },
+    {
+      "user": "秋暮",
+      "text": "为啥不走右边",
+      "gift": false
+    },
+    {
+      "user": "璀璨星辰",
+      "text": "我帮你玩",
+      "gift": false
+    },
+    {
+      "user": "小陈cyh",
+      "text": "送了嘉年华 x1",
+      "gift": true
+    },
+    {
+      "user": "斜风僵",
+      "text": "第一次看AI玩泰拉瑞亚",
+      "gift": false
+    }
+  ],
+  "songs": [
+    {
+      "user": "施某人",
+      "title": "黄瓜",
+      "state": "排队中"
+    },
+    {
+      "user": "施某人",
+      "title": "黄昏",
+      "state": "排队中"
+    },
+    {
+      "user": "落汤鱼",
+      "title": "惊蛰变奏曲",
+      "state": "排队中"
+    }
+  ]
+}

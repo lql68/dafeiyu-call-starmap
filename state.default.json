@@ -1,0 +1,27 @@
+{
+  "streamer": "小肥鱼（AI版）",
+  "sub": "主播 · AI 自动游玩 · 弹幕实时驱动",
+  "viewers": 0,
+  "uptimeSec": 0,
+  "link": "实时数据已连接",
+  "token": {
+    "balance": 0,
+    "earned": 0,
+    "note": "等待唱演"
+  },
+  "game": {
+    "title": "泰拉瑞亚",
+    "status": "游戏运行中",
+    "a": "关卡 —",
+    "b": "进度 —",
+    "c": "—",
+    "last": "—"
+  },
+  "ai": {
+    "face": "🐟",
+    "line": "……",
+    "ts": "刚刚"
+  },
+  "danmaku": [],
+  "songs": []
+}

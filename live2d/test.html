@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>大肥鱼 Live2D 测试</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1220;overflow:hidden}
+  #stage{position:absolute;inset:0}
+  canvas{display:block;margin:0 auto}
+  #msg{position:absolute;left:16px;top:14px;color:#cfe6f5;font:13px/1.6 ui-monospace,Consolas,monospace;white-space:pre}
+  #msg b{color:#ff8080}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<div id="msg">初始化…</div>
+
+<script src="lib/live2dcubismcore.min.js"></script>
+<script src="lib/pixi.min.js"></script>
+<script src="lib/cubism4.min.js"></script>
+<script>
+const out = (s) => { document.getElementById('msg').innerHTML = s; };
+window.onerror = (m, s, l) => out('<b>JS 错误</b>\n' + m + '\n' + s + ':' + l);
+
+(async () => {
+  try {
+    const app = new PIXI.Application({
+      view: document.getElementById('c'),
+      width: 900, height: 1000,
+      backgroundAlpha: 0,
+      antialias: true,
+      resolution: 1,
+    });
+
+    const model = await PIXI.live2d.Live2DModel.from('model/大肥鱼/大肥鱼.model3.json', {
+      autoInteract: false,
+      idleMotionGroup: 'Idle',
+    });
+    app.stage.addChild(model);
+    window.__l2d = { app, model };
+
+    const im = model.internalModel;
+    const ow = im.originalWidth || model.width;
+    const oh = im.originalHeight || model.height;
+    const s = Math.min(app.renderer.width / ow, app.renderer.height / oh);
+    model.scale.set(s);
+    model.x = (app.renderer.width - ow * s) / 2;
+    model.y = app.renderer.height - oh * s;
+
+    const mm = im.coreModel;
+    window.__setP = (id, v) => { try { mm.setParameterValueById(id, v); } catch (e) {} return id; };
+
+    // 让参数效果肉眼可见
+    window.__setP('ParamMouthOpenY', 0.6);
+    window.__setP('ParamAngleX', 16);
+    window.__setP('ParamAngleY', -8);
+
+    let exprN = 0, motN = 0;
+    try {
+      const st = im.settings;
+      exprN = (st.expressions || []).length;
+      motN = Object.keys(st.motions || {}).length;
+    } catch (e) {}
+
+    out('加载成功\n'
+      + `原始尺寸 ${Math.round(ow)} x ${Math.round(oh)}\n`
+      + `缩放 ${s.toFixed(4)}  位置 x=${Math.round(model.x)} y=${Math.round(model.y)}\n`
+      + `表情 ${exprN} 个 / 动作组 ${motN} 个\n`
+      + `参数数 ${mm.getParameterCount ? mm.getParameterCount() : '?'}`);
+  } catch (e) {
+    out('<b>加载失败</b>\n' + (e && e.stack ? e.stack.slice(0, 700) : e));
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>大肥鱼 脸部小件定位</title>
+<style>
+  html,body{margin:0;background:#0b1220;color:#cfe6f5;font:12px/1.4 ui-monospace,Consolas,monospace;overflow:hidden}
+  #c{position:absolute;left:-2000px;top:0}
+  #out{position:absolute;inset:0;padding:10px;white-space:pre}
+</style>
+</head>
+<body>
+<div id="out">…</div>
+<canvas id="c"></canvas>
+<script src="lib/live2dcubismcore.min.js"></script>
+<script src="lib/pixi.min.js"></script>
+<script src="lib/cubism4.min.js"></script>
+<script>
+const out = s => { document.getElementById('out').textContent = s; };
+window.onerror = (m, s, l) => out('JS 错误: ' + m + ' @' + l);
+(async () => {
+  try {
+    const app = new PIXI.Application({view: document.getElementById('c'), width: 600, height: 1200,
+      backgroundAlpha: 0, resolution: 1});
+    const model = await PIXI.live2d.Live2DModel.from('model/大肥鱼/大肥鱼.model3.json', {autoInteract: false});
+    app.stage.addChild(model);
+    model.scale.set(0.15);
+    // 让它真的渲染几帧，vertex 才会被算出来
+    await new Promise(r => setTimeout(r, 1500));
+
+    const mm = model.internalModel.coreModel;
+    const mo = mm._model;
+    const d = mo.drawables, parts = mo.parts;
+    const W = mo.canvasinfo.CanvasWidth, H = mo.canvasinfo.CanvasHeight;
+    const lines = ['canvas ' + Math.round(W) + 'x' + Math.round(H) + ' drawables=' + mm.getDrawableCount()];
+    lines.push('vp0=' + (d.vertexPositions[0] && d.vertexPositions[0].length) + ' vc0=' + d.vertexCounts[0] + ' op0=' + d.opacities[0] + ' pp0=' + d.parentPartIndices[0]);
+    lines.push('scale=' + model.scale.x + ' xy=' + model.x + ',' + model.y + ' w=' + model.width + ' h=' + model.height);
+    lines.push('--- 脸中部的小件（|cx-.5|<.12, .22<cy<.48）---');
+    for (let i = 0; i < mm.getDrawableCount(); i++) {
+      const vc = d.vertexCounts[i], vp = d.vertexPositions[i];
+      if (!vc || !vp) continue;
+      let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+      for (let k = 0; k < vc; k++) {
+        const x = vp[k * 2], y = vp[k * 2 + 1];
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+      const w = (x1 - x0) / W, h = (y1 - y0) / H;
+      const cx = (x0 + x1) / 2 / W, cy = (y0 + y1) / 2 / H;
+      if (w <= 0 || h <= 0) continue;
+      if (Math.abs(cx - 0.5) > 0.30 || cy < 0.10 || cy > 0.55) continue;
+      if (w > 0.30 || h > 0.30) continue;
+      const pp = d.parentPartIndices[i];
+      const pid = pp >= 0 ? parts.ids[pp] : '-';
+      lines.push(`${String(i).padStart(3)} ${d.ids[i].padEnd(18)} op=${(d.opacities[i]).toFixed(2)}`
+        + ` c=(${cx.toFixed(3)},${cy.toFixed(3)}) ${w.toFixed(3)}x${h.toFixed(3)} part=${pid}`);
+    }
+    out(lines.join('\n'));
+    document.title = 'done';
+  } catch (e) {
+    out('失败: ' + (e && e.stack ? e.stack.slice(0, 700) : e));
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>大肥鱼 · 自写 Cubism Core 渲染器</title>
+<style>
+  html,body{margin:0;height:100%;background:transparent;overflow:hidden}
+  #c{display:block;width:100%;height:100%}
+  #err{position:fixed;left:8px;top:8px;color:#7fd4ff;font:12px monospace;white-space:pre-wrap;max-width:95%;opacity:.75}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="err"></div>
+<script src="lib/live2dcubismcore.min.js"></script>
+<script>
+/* 直接吃 .moc3 用 WebGL 画，自己处理遮罩（stencil）——
+   绕开 pixi-live2d-display 把遮罩网格当普通网格画成黑块的问题。 */
+const QS = location.search;
+const BASE = 'model/大肥鱼/';
+const ERR = document.getElementById('err');
+const log = m => { ERR.textContent += m + '\n'; };
+window.onerror = (m, s, l) => log('JS: ' + m + ' @' + l);
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: true, stencil: true });
+if (!gl) log('拿不到 WebGL');
+
+function mkShader(t, src) {
+  const s = gl.createShader(t);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) log('shader: ' + gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, mkShader(gl.VERTEX_SHADER, `
+  attribute vec2 aPos; attribute vec2 aUv;
+  uniform mat4 uM; varying vec2 vUv;
+  void main(){ vUv = vec2(aUv.x, 1.0 - aUv.y); gl_Position = uM * vec4(aPos,0.0,1.0); }`));
+gl.attachShader(prog, mkShader(gl.FRAGMENT_SHADER, `
+  precision mediump float;
+  uniform sampler2D uTex; uniform float uAlpha; uniform vec3 uPick; uniform float uPickOn;
+  varying vec2 vUv;
+  void main(){
+    vec4 c = texture2D(uTex, vUv);
+    vec3 rgb = mix(c.rgb, uPick, uPickOn);
+    float a = mix(c.a, 1.0, uPickOn);
+    gl_FragColor = vec4(rgb * a, a) * uAlpha;
+  }`));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const A_POS = gl.getAttribLocation(prog, 'aPos');
+const A_UV = gl.getAttribLocation(prog, 'aUv');
+const U_M = gl.getUniformLocation(prog, 'uM');
+const U_TEX = gl.getUniformLocation(prog, 'uTex');
+const U_ALPHA = gl.getUniformLocation(prog, 'uAlpha');
+const U_PICK = gl.getUniformLocation(prog, 'uPick');
+const U_PICKON = gl.getUniformLocation(prog, 'uPickOn');
+
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+gl.clearColor(0, 0, 0, 0);
+
+let model = null; const buf = [], texs = [];
+let mvp = null;
+const Z = parseFloat((QS.match(/z=([\d.]+)/) || [0, '1.0'])[1]);
+const PX = parseFloat((QS.match(/px=([-\d.]+)/) || [0, '0'])[1]);
+const PY = parseFloat((QS.match(/py=([-\d.]+)/) || [0, '0'])[1]);
+const NO_MASK = QS.includes('nomask');
+const NO_VIS = QS.includes('all');
+const ONLY_MASK = QS.includes('onlymask');
+const PICK = QS.includes('pick');
+
+function resize() {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.round(canvas.clientWidth * dpr);
+  canvas.height = Math.round(canvas.clientHeight * dpr);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  const ar = canvas.width / canvas.height;
+  mvp = new Float32Array([
+    Z * ar, 0, 0, 0,
+    0, Z, 0, 0,
+    0, 0, 1, 0,
+    PX, PY, 0, 1,
+  ]);
+}
+window.addEventListener('resize', resize);
+
+async function loadTex(url) {
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  return t;
+}
+
+function drawMesh(i) {
+  const d = model.drawables;
+  const b = buf[i];
+  gl.bindBuffer(gl.ARRAY_BUFFER, b.p);
+  gl.bufferData(gl.ARRAY_BUFFER, d.vertexPositions[i], gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(A_POS);
+  gl.vertexAttribPointer(A_POS, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, b.u);
+  gl.bufferData(gl.ARRAY_BUFFER, d.vertexUvs[i], gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(A_UV);
+  gl.vertexAttribPointer(A_UV, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, b.i);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, d.indices[i], gl.STATIC_DRAW);
+  gl.drawElements(gl.TRIANGLES, d.indices[i].length, gl.UNSIGNED_SHORT, 0);
+}
+
+async function boot() {
+  const meta = await (await fetch(BASE + '大肥鱼.model3.json')).json();
+  const ab = await (await fetch(BASE + meta.FileReferences.Moc)).arrayBuffer();
+  model = Live2DCubismCore.Model.fromMoc(Live2DCubismCore.Moc.fromArrayBuffer(ab));
+  if (!model) { log('fromMoc 返回空'); return; }
+  model.drawables.resetDynamicFlags();
+
+  const d = model.drawables;
+  let masked = 0;
+  for (let i = 0; i < d.count; i++) {
+    buf.push({ p: gl.createBuffer(), u: gl.createBuffer(), i: gl.createBuffer() });
+    if (d.maskCounts && d.maskCounts[i] > 0) masked++;
+  }
+  for (const p of meta.FileReferences.Textures) texs.push(await loadTex(BASE + p));
+
+  try {
+    const v0 = d.vertexPositions[0];
+    let vis = 0;
+    for (let i = 0; i < d.count; i++) if (d.dynamicFlags[i] & 1) vis++;
+    let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
+    for (let i = 0; i < d.count; i++) {
+      if (!(d.dynamicFlags[i] & 1)) continue;
+      const v = d.vertexPositions[i]; if (!v) continue;
+      for (let k = 0; k + 1 < v.length; k += 2) {
+        const x = v[k], y = v[k + 1];
+        if (x < mnx) mnx = x; if (x > mxx) mxx = x;
+        if (y < mny) mny = y; if (y > mxy) mxy = y;
+      }
+    }
+    log('可见网格 ' + vis + '/' + d.count +
+        ' | 可见 bbox x[' + mnx.toFixed(1) + ',' + mxx.toFixed(1) + '] y[' + mny.toFixed(1) + ',' + mxy.toFixed(1) + ']');
+    const bmc = [0, 0, 0];
+    for (let i = 0; i < d.count; i++) if (d.constantFlags) { const c2 = d.constantFlags[i]; bmc[(c2 & 1) ? 1 : ((c2 & 2) ? 2 : 0)]++; }
+    log('混合模式 普通/加算/正片叠底 = ' + bmc.join('/'));
+    log('draw0 顶点数 ' + (v0 ? v0.length / 2 : 0) + ' 首点 ' + (v0 ? v0[0].toFixed(2) + ',' + v0[1].toFixed(2) : '-'));
+  } catch (e) { log('诊断异常 ' + e.message); }
+
+  log('网格 ' + d.count + ' 参数 ' + model.parameters.count + ' 带遮罩 ' + masked + ' 贴图 ' + texs.length);
+  window.__stat = { drawables: d.count, params: model.parameters.count, masked, texs: texs.length };
+  resize();
+  requestAnimationFrame(loop);
+}
+
+const T0 = performance.now();
+function drive(t) {
+  const ids = model.parameters.ids, v = model.parameters.values;
+  const set = (n, x) => { const i = ids.indexOf(n); if (i >= 0) v[i] = x; };
+  const m = QS.match(/mouth=([\d.]+)/);
+  const mo = m ? parseFloat(m[1]) : (0.5 + 0.5 * Math.sin(t / 260));
+  set('ParamAngleX', Math.sin(t / 2300) * 12);
+  set('ParamAngleY', Math.sin(t / 3100) * 8);
+  set('ParamAngleZ', Math.sin(t / 2900) * 4);
+  set('ParamBodyAngleX', Math.sin(t / 2600) * 4);
+  set('ParamBreath', 0.5 + 0.5 * Math.sin(t / 1700));
+  set('ParamEyeBallX', Math.sin(t / 3500) * 0.4);
+  set('ParamMouthOpenY', mo);
+  set('ParamMouthForm', 0.2);
+  return mo;
+}
+
+function loop(now) {
+  const t = now - T0;
+  drive(t);
+  model.update();
+
+  const d = model.drawables;
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+  gl.useProgram(prog);
+  gl.uniformMatrix4fv(U_M, false, mvp);
+  gl.uniform1i(U_TEX, 0);
+
+  for (let i = 0; i < d.count; i++) {
+    const op = d.opacities[i];
+    if (op <= 0.004) continue;
+    // dynamicFlags 第 0 位 = isVisible。遮罩用的网格在 moc 里是不可见的，
+    // 不判这一位就会被当成普通图元画出来（黑块 / 碎片都是它）
+    if (!NO_VIS && d.dynamicFlags && (d.dynamicFlags[i] & 1) === 0) continue;
+
+    if (PICK) {
+      if (i === 646) continue;
+      const r = ((i & 31) * 8) / 255, g = (((i >> 5) & 31) * 8) / 255, b = 255 / 255;
+      gl.uniform3f(U_PICK, r, g, b);
+      gl.uniform1f(U_PICKON, 1);
+      gl.disable(gl.STENCIL_TEST);
+      gl.blendFunc(gl.ONE, gl.ZERO);
+      gl.bindTexture(gl.TEXTURE_2D, texs[d.textureIndices[i]] || texs[0]);
+      gl.uniform1f(U_ALPHA, 1);
+      drawMesh(i);
+      continue;
+    }
+    gl.uniform1f(U_PICKON, 0);
+    const mc = (d.maskCounts ? d.maskCounts[i] : 0) | 0;
+    if (ONLY_MASK && mc === 0) continue;
+    if (mc > 0 && !NO_MASK) {
+      gl.clear(gl.STENCIL_BUFFER_BIT);
+      gl.enable(gl.STENCIL_TEST);
+      gl.colorMask(false, false, false, false);
+      gl.stencilFunc(gl.ALWAYS, 1, 0xFF);
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
+      const masks = d.masks[i];
+      for (let k = 0; k < mc; k++) drawMesh(masks[k]);
+      gl.colorMask(true, true, true, true);
+      gl.stencilFunc(gl.NOTEQUAL, 0, 0xFF);
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+    } else {
+      gl.disable(gl.STENCIL_TEST);
+    }
+
+    // 混合模式：constantFlags 的 bit1-2（0 普通 / 1 加算 / 2 正片叠底）
+    const cf = d.constantFlags ? d.constantFlags[i] : 0;
+    const bm = (cf & 1) ? 1 : ((cf & 2) ? 2 : 0);   // bit0=加算 bit1=正片叠底
+    if (bm === 1) gl.blendFunc(gl.ONE, gl.ONE);                       // 加算
+    else if (bm === 2) gl.blendFunc(gl.DST_COLOR, gl.ONE_MINUS_SRC_ALPHA); // 正片叠底
+    else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);                // 普通
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texs[d.textureIndices[i]] || texs[0]);
+    gl.uniform1f(U_ALPHA, op);
+    drawMesh(i);
+  }
+  gl.disable(gl.STENCIL_TEST);
+  requestAnimationFrame(loop);
+}
+
+boot().catch(e => log('boot: ' + (e && e.message || e)));
+</script>
+</body>
+</html>

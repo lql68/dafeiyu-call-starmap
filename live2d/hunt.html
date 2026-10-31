@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>大肥鱼 黑块溯源</title>
+<style>html,body{margin:0;background:#0b1220;color:#cfe6f5;font:12px/1.4 ui-monospace,monospace}
+#c{position:absolute;left:-3000px}#out{position:absolute;inset:0;padding:10px;white-space:pre}</style>
+</head>
+<body>
+<div id="out">…</div><canvas id="c"></canvas>
+<script src="lib/live2dcubismcore.min.js"></script>
+<script src="lib/pixi.min.js"></script>
+<script src="lib/cubism4.min.js"></script>
+<script>
+const out = s => { document.getElementById('out').textContent = s; };
+window.onerror = (m, s, l) => out('JS 错误: ' + m + ' @' + l);
+(async () => {
+  try {
+    const CW = 400, CH = 800;
+    const app = new PIXI.Application({view: document.getElementById('c'), width: CW, height: CH,
+      backgroundAlpha: 0, antialias: false, resolution: 1});
+    const model = await PIXI.live2d.Live2DModel.from('model/大肥鱼/大肥鱼.model3.json', {autoInteract: false});
+    app.stage.addChild(model);
+    app.ticker.stop();                      // 手动驱动，才能在同一帧里改完就渲染
+
+    const im = model.internalModel;
+    const s = CH / (im.originalHeight * 0.42);      // 和 live.html 一样的头肩取景
+    model.scale.set(s);
+    model.x = (CW - im.originalWidth * s) / 2;
+    model.y = 0;
+
+    const gl = app.renderer.gl;
+    const px = new Uint8Array(4);
+    const readRGB = (x, y) => {                     // y 用「屏幕坐标」，内部翻转
+      gl.readPixels(x, CH - 1 - y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      return [px[0], px[1], px[2], px[3]];
+    };
+    const frame = () => {
+      model.update(1 / 60);
+      app.renderer.render(app.stage);
+    };
+
+    frame();
+    // 找那块黑：在脸部区域扫一遍，取最暗像素
+    let best = null;
+    for (let y = Math.round(CH * 0.10); y < Math.round(CH * 0.55); y += 2) {
+      for (let x = Math.round(CW * 0.30); x < Math.round(CW * 0.70); x += 2) {
+        const [r, g, b, a] = readRGB(x, y);
+        if (a < 200) continue;
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        if (lum < 40 && (!best || lum < best.lum)) best = {x, y, lum: Math.round(lum), r, g, b};
+      }
+    }
+    if (!best) { out('没找到暗块（可能这次没出现）'); return; }
+
+    const base = readRGB(best.x, best.y);
+    const lines = ['暗块位置 ' + best.x + ',' + best.y + ' rgb=' + best.r + ',' + best.g + ',' + best.b];
+
+    const mm = im.coreModel;
+    const mo = mm._model;
+    const d = mo.drawables;
+    const n = mm.getDrawableCount();
+    const isDark = () => {
+      const p = readRGB(best.x, best.y);
+      return (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) < 60;
+    };
+
+    let hit = -1;
+    for (let i = 0; i < n; i++) {
+      const keep = d.opacities[i];
+      d.opacities[i] = 0;
+      frame();
+      const still = isDark();
+      d.opacities[i] = keep;
+      if (!still) { hit = i; break; }
+    }
+    frame();
+    if (hit < 0) {
+      lines.push('逐个隐藏 ' + n + ' 个 drawable 都没让暗块消失 → 不是单个 drawable 画的');
+    } else {
+      const pp = d.parentPartIndices[hit];
+      const partId = pp >= 0 ? mo.parts.ids[pp] : '-';
+      lines.push('元凶 drawable #' + hit + ' id=' + d.ids[hit]
+        + ' 父Part=' + partId + ' vc=' + d.vertexCounts[hit]
+        + ' flags=' + d.constantFlags[hit]);
+      // 顺便把这件东西的包围盒打出来
+      const vc = d.vertexCounts[hit], vp = d.vertexPositions[hit];
+      let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+      for (let k = 0; k < vc; k++) {
+        const x = vp[k * 2], y = vp[k * 2 + 1];
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+      const W = mo.canvasinfo.CanvasWidth, H = mo.canvasinfo.CanvasHeight;
+      lines.push('bbox 归一化 x[' + (x0 / W).toFixed(3) + ',' + (x1 / W).toFixed(3)
+        + '] y[' + (y0 / H).toFixed(3) + ',' + (y1 / H).toFixed(3) + ']');
+    }
+    out(lines.join('\n'));
+    document.title = 'done';
+  } catch (e) {
+    out('失败: ' + (e && e.stack ? e.stack.slice(0, 800) : e));
+  }
+})();
+</script>
+</body>
+</html>

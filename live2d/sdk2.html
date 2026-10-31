@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>自写 Cubism Core 渲染器 v2</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1622;overflow:hidden}
+  #c{display:block;width:100%;height:100%}
+  #err{position:fixed;left:8px;top:8px;color:#8fd;font:12px/1.45 monospace;white-space:pre-wrap;max-width:92%;
+       background:rgba(0,0,0,.45);padding:6px 8px;border-radius:6px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="err"></div>
+<script src="lib/live2dcubismcore.min.js"></script>
+<script>
+const LOG = [];
+function log(s) { LOG.push(s); document.getElementById('err').textContent = LOG.join('\n'); }
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', { premultipliedAlpha: true, alpha: true, antialias: true, stencil: true });
+if (!gl) log('没有 WebGL');
+
+const BASE = 'model/大肥鱼/';
+const QS = location.search;
+const Z = parseFloat((QS.match(/z=([\d.]+)/) || [0, 1.0])[1]);
+const PANX = parseFloat((QS.match(/panx=([-\d.]+)/) || [0, 0])[1]);
+const PANY = parseFloat((QS.match(/pany=([-\d.]+)/) || [0, 0])[1]);
+const PICK = QS.includes('pick');
+const NO_VIS = QS.includes('all');
+const NO_MASK = QS.includes('nomask');
+
+/* ---------- 着色器 ---------- */
+const VS = `
+attribute vec2 aPos; attribute vec2 aUv;
+uniform mat4 uM;
+varying vec2 vUv;
+void main(){ vUv = vec2(aUv.x, 1.0 - aUv.y); gl_Position = uM * vec4(aPos, 0.0, 1.0); }`;
+
+const FS = `
+precision mediump float;
+uniform sampler2D uTex; uniform sampler2D uMask;
+uniform float uAlpha; uniform float uUseMask;
+uniform vec3 uPick; uniform float uPickOn;
+uniform vec2 uRes;
+varying vec2 vUv;
+void main(){
+  vec4 c = texture2D(uTex, vUv);
+  vec3 rgb = mix(c.rgb, uPick, uPickOn);
+  float a = mix(c.a, 1.0, uPickOn);
+  if (uUseMask > 0.5) a *= texture2D(uMask, gl_FragCoord.xy / uRes).a;
+  gl_FragColor = vec4(rgb * a, a) * uAlpha;
+}`;
+
+function sh(t, src) {
+  const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) log('着色器错误 ' + gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const A_POS = gl.getAttribLocation(prog, 'aPos');
+const A_UV = gl.getAttribLocation(prog, 'aUv');
+const U_M = gl.getUniformLocation(prog, 'uM');
+const U_TEX = gl.getUniformLocation(prog, 'uTex');
+const U_MASK = gl.getUniformLocation(prog, 'uMask');
+const U_ALPHA = gl.getUniformLocation(prog, 'uAlpha');
+const U_USEMASK = gl.getUniformLocation(prog, 'uUseMask');
+const U_PICK = gl.getUniformLocation(prog, 'uPick');
+const U_PICKON = gl.getUniformLocation(prog, 'uPickOn');
+const U_RES = gl.getUniformLocation(prog, 'uRes');
+
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+gl.clearColor(0, 0, 0, 0);
+gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+
+let model = null, drawabs = [], texs = [], mvp = null, BOX = null;
+let maskTex = null, maskFbo = null;
+
+function resize() {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.round(canvas.clientWidth * dpr);
+  canvas.height = Math.round(canvas.clientHeight * dpr);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.uniform2f(U_RES, canvas.width, canvas.height);
+  maskTex = null;   // 尺寸变了要重建
+}
+window.addEventListener('resize', resize);
+
+function ensureMaskBuf() {
+  if (maskTex && maskTex.__w === canvas.width && maskTex.__h === canvas.height) return;
+  if (maskFbo) gl.deleteFramebuffer(maskFbo);
+  if (maskTex) gl.deleteTexture(maskTex);
+  maskTex = gl.createTexture();
+  maskTex.__w = canvas.width; maskTex.__h = canvas.height;
+  gl.bindTexture(gl.TEXTURE_2D, maskTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  maskFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, maskFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, maskTex, 0);
+  const st = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  log("maskFbo 状态 " + st + (st === gl.FRAMEBUFFER_COMPLETE ? " (完整)" : " (不完整!)"));
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+async function loadTex(url) {
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  return t;
+}
+
+function drawMesh(i) {
+  const d = model.drawables, dd = drawabs[i];
+  if (!dd) return;
+  gl.bindBuffer(gl.ARRAY_BUFFER, dd.bp);
+  gl.bufferData(gl.ARRAY_BUFFER, d.vertexPositions[i], gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(A_POS);
+  gl.vertexAttribPointer(A_POS, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, dd.bu);
+  gl.bufferData(gl.ARRAY_BUFFER, d.vertexUvs[i], gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(A_UV);
+  gl.vertexAttribPointer(A_UV, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, dd.bi);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, d.indices[i], gl.STATIC_DRAW);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texs[d.textureIndices[i]] || texs[0]);
+  gl.uniform1i(U_TEX, 0);
+  gl.drawElements(gl.TRIANGLES, d.indices[i].length, gl.UNSIGNED_SHORT, 0);
+}
+
+/* ---------- 参数 ---------- */
+const P = { ts: performance.now() };
+function setP(name, v) {
+  const ids = model.parameters.ids, vals = model.parameters.values;
+  const i = ids.indexOf(name);
+  if (i >= 0) vals[i] = v;
+}
+function applyParams(t) {
+  setP('ParamAngleX', Math.sin(t / 2300) * 12);
+  setP('ParamAngleY', Math.sin(t / 3100) * 8);
+  setP('ParamAngleZ', Math.sin(t / 2900) * 4);
+  setP('ParamBodyAngleX', Math.sin(t / 2600) * 4);
+  setP('ParamBreath', 0.5 + 0.5 * Math.sin(t / 1700));
+  setP('ParamEyeBallX', Math.sin(t / 3500) * 0.4);
+  setP('ParamEyeBallY', Math.sin(t / 4100) * 0.25);
+  setP('ParamMouthOpenY', 0.12 + 0.30 * (0.5 + 0.5 * Math.sin(t / 260)));
+  setP('ParamMouthForm', 0.3);
+}
+
+function buildMvp() {
+  const ar = canvas.width / canvas.height;
+  mvp = new Float32Array([
+    Z * ar, 0, 0, 0,
+    0, Z, 0, 0,
+    0, 0, 1, 0,
+    PANX, PANY, 0, 1,
+  ]);
+  return mvp;
+}
+
+/* ---------- 主循环 ---------- */
+function loop(now) {
+  const t = now - P.ts;
+  buildMvp();
+  applyParams(t);
+  model.update();
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(prog);
+  gl.uniformMatrix4fv(U_M, false, mvp);
+
+  const d = model.drawables;
+  for (let i = 0; i < d.count; i++) {
+    const op = d.opacities[i];
+    if (op <= 0.004) continue;
+    if (!NO_VIS && d.dynamicFlags && (d.dynamicFlags[i] & 1) === 0) continue;
+
+    if (PICK) {
+      const r = ((i * 37) % 251) / 255, g = ((i * 73) % 241) / 255, b = ((i * 113) % 239) / 255;
+      gl.uniform3f(U_PICK, r, g, b);
+      gl.uniform1f(U_PICKON, 1);
+      gl.uniform1f(U_USEMASK, 0);
+      gl.blendFunc(gl.ONE, gl.ZERO);
+      gl.uniform1f(U_ALPHA, 1);
+      drawMesh(i);
+      continue;
+    }
+    gl.uniform1f(U_PICKON, 0);
+
+    /* ---- 遮罩：渲染到独立 framebuffer，多个遮罩用乘法求交 ---- */
+    const mc = (d.maskCounts ? d.maskCounts[i] : 0) | 0;
+    let usedMask = 0;
+    if (mc > 0 && !NO_MASK && d.masks && d.masks[i]) {
+      ensureMaskBuf();
+      // 关键：maskTex 上一帧绑在 TEXTURE1 上，直接往它渲染会构成 feedback loop
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, maskFbo);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      gl.uniform1f(U_USEMASK, 0);
+      gl.uniform1f(U_PICKON, 1);
+      gl.uniform3f(U_PICK, 1, 1, 1);
+      gl.uniform1f(U_ALPHA, 1);
+      gl.uniformMatrix4fv(U_M, false, mvp);
+      const masks = d.masks[i];
+      for (let k = 0; k < mc; k++) {
+        // 第一个 replace，之后乘上去 = 求交；白色重叠会被 clamp 到 1，不会溢出
+        if (k === 0) gl.blendFunc(gl.ONE, gl.ZERO);
+        else gl.blendFunc(gl.DST_COLOR, gl.ZERO);
+        drawMesh((masks[k] - 1 + d.count) % d.count);
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.uniformMatrix4fv(U_M, false, mvp);
+      gl.uniform1f(U_PICKON, 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, maskTex);
+      gl.uniform1i(U_MASK, 1);
+      usedMask = 1;
+    }
+    gl.uniform1f(U_USEMASK, usedMask);
+
+    const cf = d.constantFlags ? d.constantFlags[i] : 0;
+    const bm = (cf & 1) ? 1 : ((cf & 2) ? 2 : 0);
+    if (bm === 1) gl.blendFunc(gl.ONE, gl.ONE);
+    else if (bm === 2) gl.blendFunc(gl.DST_COLOR, gl.ONE_MINUS_SRC_ALPHA);
+    else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+    gl.uniform1f(U_ALPHA, op);
+    drawMesh(i);
+  }
+  gl.uniform1f(U_USEMASK, 0);
+  requestAnimationFrame(loop);
+}
+
+/* ---------- 启动 ---------- */
+async function boot() {
+  const meta = await (await fetch(BASE + '大肥鱼.model3.json')).json();
+  const buf = await (await fetch(BASE + meta.FileReferences.Moc)).arrayBuffer();
+  const moc = Live2DCubismCore.Moc.fromArrayBuffer(buf);
+  model = Live2DCubismCore.Model.fromMoc(moc);
+  if (!model) { log('Model.fromMoc 返回空'); return; }
+
+  for (const p of meta.FileReferences.Textures) texs.push(await loadTex(BASE + p));
+  const d = model.drawables;
+  for (let i = 0; i < d.count; i++) {
+    drawabs.push({ bp: gl.createBuffer(), bu: gl.createBuffer(), bi: gl.createBuffer() });
+  }
+
+  resize();
+  applyParams(0);
+  model.update();
+
+  let vis = 0, masked = 0;
+  for (let i = 0; i < d.count; i++) {
+    if (d.dynamicFlags[i] & 1) vis++;
+    if ((d.maskCounts ? d.maskCounts[i] : 0) > 0) masked++;
+  }
+
+  /* ---- 候选黑块诊断 ---- */
+  try {
+    // 把 5 张贴图画进 2D canvas 便于取色
+    const atlas = meta.FileReferences.Textures.map(function (p) {
+      const c = document.createElement('canvas');
+      const im = new Image();
+      im.src = BASE + p;
+      c.width = 64; c.height = 64;   // 先占位
+      return { c: c, im: im, ready: false,
+               load: function () {
+                 c.width = im.width; c.height = im.height;
+                 c.getContext('2d').drawImage(im, 0, 0);
+                 this.ready = true;
+               } };
+    });
+    await Promise.all(atlas.map(function (a) {
+      return new Promise(function (res) {
+        if (a.im.complete) { a.load(); res(); }
+        else { a.im.onload = function () { a.load(); res(); }; a.im.onerror = res; }
+      });
+    }));
+
+    function lumAt(ti, u, v) {
+      const a = atlas[ti];
+      if (!a || !a.ready) return 255;
+      const w = a.c.width, h = a.c.height;
+      const x = Math.min(w - 1, Math.max(0, Math.round(u * w)));
+      const y = Math.min(h - 1, Math.max(0, Math.round((1 - v) * h)));
+      const d = a.c.getContext('2d').getImageData(x, y, 1, 1).data;
+      if (d[3] < 200) return -1;                    // 透明区域不算
+      return 0.299 * d[0] + 0.587 * d[1] + 0.114 * d[2];
+    }
+
+    const cand = [];
+    for (let i = 0; i < d.count; i++) {
+      if ((d.dynamicFlags[i] & 1) === 0) continue;
+      const vp = d.vertexPositions[i], uv = d.vertexUvs[i];
+      if (!vp || !uv || !vp.length) continue;
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (let k = 0; k + 1 < vp.length; k += 2) {
+        const x = vp[k], y = vp[k + 1];
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+      const bw = x1 - x0, bh = y1 - y0;
+      if (bw > 0.16 || bh > 0.16) continue;        // 黑块很小
+      if (bh < 0.004 || bw < 0.004) continue;
+      // 取 UV 中心的亮度
+      let su = 0, sv = 0, n = 0;
+      for (let k = 0; k + 1 < uv.length; k += 2) { su += uv[k]; sv += uv[k + 1]; n++; }
+      if (!n) continue;
+      const L = lumAt(d.textureIndices[i], su / n, sv / n);
+      if (L >= 0 && L < 70) cand.push({ i: i, L: Math.round(L), bw: +bw.toFixed(3), bh: +bh.toFixed(3),
+                              cx: +((x0 + x1) / 2).toFixed(2), cy: +((y0 + y1) / 2).toFixed(2),
+                              op: +d.opacities[i].toFixed(2) });
+    }
+    cand.sort(function (a, b) { return a.L - b.L; });
+    log('CANDIDATES ' + cand.length + ' 个');
+    cand.slice(0, 24).forEach(function (c) {
+      log('  #' + c.i + ' 亮度' + c.L + ' 尺寸' + c.bw + 'x' + c.bh +
+          ' 中心(' + c.cx + ',' + c.cy + ') 透明度' + c.op);
+    });
+  } catch (e) { log('候选诊断异常 ' + e.message); }
+
+  log('网格 ' + d.count + ' 可见 ' + vis + ' 带遮罩 ' + masked +
+      ' | 参数 ' + model.parameters.count + ' | 贴图 ' + texs.length +
+      ' | 画布 ' + canvas.width + 'x' + canvas.height);
+  requestAnimationFrame(loop);
+}
+boot().catch(e => log('boot: ' + (e && e.message || e)));
+</script>
+</body>
+</html>
