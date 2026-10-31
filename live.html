@@ -582,6 +582,21 @@
 
 </style>
 <style>
+/* 启动动画层：盖住一切，播完淡出让位给闸门 */
+.boot{position:fixed;inset:0;z-index:120;background:#05070b;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
+  transition:opacity .55s ease, visibility .55s}
+.boot.gone{opacity:0;visibility:hidden;pointer-events:none}
+.boot video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  display:none}
+.boot video.on{display:block}
+.boot canvas{position:absolute;inset:0;width:100%;height:100%}
+.boot canvas.off{display:none}
+.boot-tip{position:absolute;right:26px;bottom:22px;z-index:2;
+  font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+  color:#5a6a7c;opacity:0;transition:opacity .4s}
+.boot-tip.on{opacity:1}
+
 .gate{position:fixed;inset:0;z-index:99;display:flex;align-items:center;justify-content:center;
   background:radial-gradient(circle at 50% 45%,rgba(10,26,44,.86),rgba(3,8,16,.97));backdrop-filter:blur(6px);
   transition:opacity .45s ease}
@@ -718,6 +733,12 @@
   <div class="stamp">AI 生成内容 · 虚拟形象 · 模型 神宫凉子 / Live2D 霓虹猫_NeonNeko</div>
 </div>
 
+<div class="boot" id="boot">
+  <video id="bootVid" muted playsinline preload="auto"></video>
+  <canvas id="bootCv"></canvas>
+  <div class="boot-tip" id="bootTip">点击跳过</div>
+</div>
+
 <div class="gate" id="gate">
   <div class="gate-in">
     <div class="gate-dot"></div>
@@ -735,9 +756,140 @@
 <script src="live2d/lib/pixi.min.js"></script>
 <script src="live2d/lib/cubism4.min.js"></script>
 <script>
+  (function bootSeq(){
+    const G = function(id){ return document.getElementById(id); };
+    const boot = G('boot'), vid = G('bootVid'), cv = G('bootCv'), tip = G('bootTip');
+    if(!boot) return;
+
+    /* 截图/自动接通时不放动画 */
+    if(/[?&](auto|star)=1/.test(location.search) || location.hash === '#noboot'){
+      boot.classList.add('gone');
+      return;
+    }
+
+    let done = false;
+    const bootT0 = performance.now();
+    function finish(){
+      if(done) return;
+      done = true;
+      tip.classList.remove('on');
+      boot.classList.add('gone');
+      setTimeout(function(){
+        try{ vid.pause(); vid.removeAttribute('src'); vid.load(); }catch(e){}
+      }, 700);
+    }
+    function armSkip(){
+      tip.classList.add('on');
+      boot.addEventListener('click', finish, { once:true });
+      setTimeout(function(){ if(!done) boot.addEventListener('click', finish, { once:true }); }, 900);
+    }
+
+    /* —— 有视频就播视频 —— */
+    vid.addEventListener('loadeddata', function(){
+      if(done) return;
+      /* 视频来得太晚（>900ms）就别切了，canvas 已经在动，切过去反而跳 */
+      if(performance.now() - bootT0 > 900) return;
+      cv.classList.add('off');
+      vid.classList.add('on');
+      vid.play().then(function(){
+        armSkip();
+      }).catch(function(){
+        /* 自动播放被拦：保留视频第一帧，等点击 */
+        armSkip();
+      });
+    }, { once:true });
+
+    vid.addEventListener('ended', function(){
+      setTimeout(finish, 160);   /* 结尾留半拍，别一黑就跳 */
+    }, { once:true });
+
+    vid.addEventListener('error', function(){ runCanvas(); }, { once:true });
+
+    /* 4 秒内视频还没 ready，就上程序化动画兜底 */
+    const guard = setTimeout(function(){
+      if(!vid.classList.contains('on')) return;   /* canvas 已经在跑了 */
+    }, 4000);
+
+    let canvasStarted = false;
+    function runCanvas(){
+      if(canvasStarted || done) return;   /* 幂等：video error 和手动调用只走一次 */
+      canvasStarted = true;
+      clearTimeout(guard);
+      cv.classList.remove('off');
+      const ctx = cv.getContext('2d');
+      const DPR = Math.min(2, window.devicePixelRatio || 1);
+      let W = 0, H = 0;
+      function size(){
+        W = cv.clientWidth; H = cv.clientHeight;
+        cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      }
+      size(); addEventListener('resize', size);
+
+      const T0 = performance.now(), DUR = 2600, FADE = 520;
+      const NAME = '大肥鱼';
+
+      (function draw(){
+        const t = performance.now() - T0;
+        ctx.fillStyle = '#05070b';
+        ctx.fillRect(0, 0, W, H);
+
+        /* 暖色光晕在中心慢慢亮起来 */
+        const glow = Math.min(1, t / 1500) * (1 - Math.max(0, (t - DUR) / FADE));
+        const rg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.min(W, H) * 0.62);
+        rg.addColorStop(0.00, 'rgba(120,190,235,' + (0.16 * glow).toFixed(3) + ')');
+        rg.addColorStop(0.45, 'rgba(90,150,200,' + (0.07 * glow).toFixed(3) + ')');
+        rg.addColorStop(1.00, 'rgba(40,70,110,0)');
+        ctx.fillStyle = rg; ctx.fillRect(0, 0, W, H);
+
+        /* 一条扫描线从下往上扫过 */
+        const sy = H * (1 - Math.min(1, t / 1700));
+        const lg = ctx.createLinearGradient(0, sy - 90, 0, sy + 90);
+        lg.addColorStop(0, 'rgba(120,200,240,0)');
+        lg.addColorStop(0.5, 'rgba(150,220,250,' + (0.20 * glow).toFixed(3) + ')');
+        lg.addColorStop(1, 'rgba(120,200,240,0)');
+        ctx.fillStyle = lg; ctx.fillRect(0, sy - 90, W, 180);
+
+        /* 名字逐字浮现 */
+        const put = Math.max(0, Math.min(NAME.length, (t - 620) / 240));
+        const txt = NAME.slice(0, Math.floor(put));
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = '600 40px ' + getComputedStyle(document.body).fontFamily;
+        ctx.fillStyle = 'rgba(223,243,251,' + (0.92 * glow).toFixed(3) + ')';
+        ctx.fillText(txt, W / 2, H / 2 - 8);
+
+        /* 下面一行小字 + 加载条 */
+        ctx.font = '500 12px ' + getComputedStyle(document.body).fontFamily;
+        ctx.fillStyle = 'rgba(120,150,175,' + (0.75 * glow).toFixed(3) + ')';
+        ctx.fillText('D E E P S E E K   H A R N E S S', W / 2, H / 2 + 44);
+
+        const bw = 190, bh = 2, bx = (W - bw) / 2, by = H / 2 + 78;
+        ctx.fillStyle = 'rgba(120,150,175,' + (0.18 * glow).toFixed(3) + ')';
+        ctx.fillRect(bx, by, bw, bh);
+        const p = Math.min(1, t / 1900);
+        const pg = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+        pg.addColorStop(0, 'rgba(150,220,250,' + (0.85 * glow).toFixed(3) + ')');
+        pg.addColorStop(1, 'rgba(210,225,190,' + (0.85 * glow).toFixed(3) + ')');
+        ctx.fillStyle = pg;
+        ctx.fillRect(bx, by, bw * p, bh);
+
+        if(t < DUR){ requestAnimationFrame(draw); }
+        else { finish(); }
+      })();
+      armSkip();
+    }
+
+    /* 先把 canvas 动画跑起来（保证永远不会是黑屏），
+       再把视频挂上去；视频 900ms 内就绪才会盖上来。 */
+    runCanvas();
+    vid.src = 'boot/boot.mp4';
+    vid.load();
+  })();
+
 /* 出错别静默：直接写到接通闸的提示行，方便排查（也能给用户看） */
 window.onerror = function(m, s, l){
   const g = document.getElementById('gateMsg');
+
   if(g){ g.textContent = 'JS 错误: ' + m + ' @L' + l; g.style.color = '#ff8a8a'; }
   return false;
 };
