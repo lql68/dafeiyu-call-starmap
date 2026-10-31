@@ -55,7 +55,7 @@ def cur_dev():
         pass
     return VIDEO_DEV
 AUDIO_DEV = "audio=麦克风阵列 (Senary Audio)"
-W, H, FPS = 640, 480, 24   # 15 -> 24：单帧年龄从 67ms 降到 42ms，CPU 还扛得住
+W, H, FPS = 640, 480, 30   # 用摄像头标称的 30（24 不是标称值，dshow 会拒绝）
 FSZ = W * H * 3
 ASZ = 16000 * 2 // 10          # 100ms 音频块
 
