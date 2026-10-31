@@ -1,9 +1,0 @@
-fix(services): add start-services bat to launch both services without the watchdog
-
-The ai-live-watchdog scheduled task is disabled on purpose now, so when
-voice_server(8770) or vision.py dies nothing brings it back. Symptoms:
-- camera panel turns grey (/cam.mjpg has no frames, vision/latest.jpg stale)
-- HUD brightness / motion / look / emotion all freeze
-- page looks like "Live2D and camera failed to load"
-
-This bat only starts the services; it does not touch the scheduled task.

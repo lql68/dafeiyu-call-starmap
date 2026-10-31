@@ -35,3 +35,5 @@ vts_token.json
 obs/
 # 大参考音频
 tts/refs/cover_full.wav
+.gitmsg.txt
+.git-commit-msg.txt
