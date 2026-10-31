@@ -54,6 +54,19 @@ for e in edge_rows:
     deg[e["s"]] = deg.get(e["s"], 0) + 1
     deg[e["t"]] = deg.get(e["t"], 0) + 1
 
+# 每个节点关联到的原子的平均 importance（用来分「恒星 / 星云 / 尘埃」）
+imp = {}
+for r in con.execute(
+    """
+    SELECT gn.id AS nid, AVG(ma.importance) AS imp
+    FROM graph_nodes gn
+    JOIN graph_edges ge ON ge.source_node_id = gn.id
+    JOIN memory_atoms ma ON ma.parent_memory_id = ge.source_memory_id
+    GROUP BY gn.id
+    """
+):
+    imp[r["nid"]] = float(r["imp"] or 0.0)
+
 now = time.time()
 
 
@@ -88,6 +101,8 @@ for n in cand:
     rad = round(1.0 - 0.40 * (math.log2(1 + d) / math.log2(1 + maxd)), 3)
     nodes.append({
         "t": tidx,
+        "k": n["node_type"],
+        "imp": round(imp.get(n["id"], 0.0), 3),
         "d": d,
         "a": round(age_days(n["created_at"]), 1),
         "r": rad,
