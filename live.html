@@ -437,11 +437,38 @@
     border-radius:50%;
     background:radial-gradient(circle,rgba(8,12,18,.92) 0%,rgba(8,12,18,.72) 62%,rgba(8,12,18,.28) 88%,rgba(8,12,18,0) 100%)}
   #mindCv{width:250px;height:250px;display:block}
+  .mind{cursor:pointer;transition:transform .22s, box-shadow .22s}
+  .mind.zoom{transform:scale(9);opacity:0;
+    transition:transform .55s cubic-bezier(.38,0,.24,1), opacity .45s ease-in}
+.mind:hover{transform:scale(1.03);
+    box-shadow:0 0 0 1px rgba(217,200,166,.35), 0 0 34px rgba(217,200,166,.14)}
+  .mind:hover .ring{border-color:rgba(217,200,166,.55)}
+  .mind:active{transform:scale(.99)}
+  .mind .hint{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
+    text-align:center;font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+    color:#d9c8a6;opacity:0;transition:opacity .2s;pointer-events:none}
+  .mind:hover .hint{opacity:.92}
   .mind .ring{position:absolute;inset:0;border-radius:50%;
     border:1px solid var(--line)}
   .mind .cap{position:absolute;left:0;right:0;bottom:5px;text-align:center;
     font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;color:var(--ink-2)}
   .mind .cap b{color:var(--ink-2);font-weight:400}
+
+  /* 全屏星图 */
+  #starFull{position:fixed;inset:0;z-index:60;display:none;background:#05070c}
+  #starFull.on{display:block}
+  #starFull iframe{width:100%;height:100%;border:0;display:block;
+    opacity:0;transition:opacity .5s ease-out}
+  #starFull.on iframe{opacity:1}
+  #starBack{position:absolute;left:22px;top:18px;z-index:3;
+    display:flex;align-items:center;gap:7px;padding:7px 15px 7px 11px;
+    border:1px solid rgba(140,160,190,.34);border-radius:999px;
+    background:rgba(8,12,18,.82);color:#c6cfdb;cursor:pointer;
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.05em;
+    transition:all .2s;backdrop-filter:blur(3px)}
+  #starBack:hover{color:#d9c8a6;border-color:rgba(217,200,166,.6);
+    background:rgba(14,18,26,.9)}
+  #starBack i{font-style:normal;font-size:14px;line-height:1}
 
   /* 字幕（双语） */
   .sub{position:absolute;left:0;right:0;bottom:214px;text-align:center}
@@ -621,7 +648,13 @@
     <div class="mind">
       <canvas id="mindCv" width="500" height="500"></canvas>
       <div class="ring"></div>
+      <div class="hint">展开星图 ›</div>
       <div class="cap">记忆节点 <b id="mNode">—</b> · 连线 <b id="mEdge">—</b></div>
+    </div>
+
+    <div id="starFull" aria-hidden="true">
+      <button id="starBack" title="回到通话（Esc）"><i>←</i> 回到通话</button>
+      <iframe id="starFrame" src="about:blank" title="记忆星图"></iframe>
     </div>
 
     <div class="sub">
@@ -1726,6 +1759,58 @@ function renderClock(){
    点的颜色 = 节点类型，大小 = 度数（log），亮度 = 深度 + 新近度。 */
 (function mind(){
   const cv = document.getElementById('mindCv');
+
+  /* ── 点识海球 → 展开成全屏星图 ──────────────────────────
+     展开时把 Live2D 停掉：她这时候被星图完全盖住，画了也看不见，
+     停掉省下每帧 3ms 左右，让星图独占主线程跑满帧。关掉立刻恢复。 */
+  let starOpen = false;
+  const starFull  = document.getElementById('starFull');
+  const starFrame = document.getElementById('starFrame');
+  const starBack  = document.getElementById('starBack');
+
+  function openStar(){
+    if(starOpen || !starFull) return;
+    starOpen = true;
+    const box = cv.closest('.mind');
+    if(box) box.classList.add('zoom');                 /* 球放大并淡出，当转场 */
+    try{ if(window.__l2d && window.__l2d.app) window.__l2d.app.stop(); }catch(e){}
+    starFrame.src = 'starmap.html?embed=1';
+    starFull.classList.add('on');
+    starFull.setAttribute('aria-hidden', 'false');
+    setTimeout(function(){ if(box) box.classList.remove('zoom'); }, 620);
+    console.log('[mind] 展开星图（立绘已暂停）');
+  }
+
+  function closeStar(){
+    if(!starOpen || !starFull) return;
+    starOpen = false;
+    starFull.classList.remove('on');
+    starFull.setAttribute('aria-hidden', 'true');
+    try{ if(window.__l2d && window.__l2d.app) window.__l2d.app.start(); }catch(e){}
+    setTimeout(function(){ starFrame.src = 'about:blank'; }, 520);  /* 释放渲染 */
+    console.log('[mind] 回到通话（立绘已恢复）');
+  }
+  window.closeStar = closeStar;
+
+  (function bindStarMap(){
+    const box = cv.closest('.mind');
+    if(!box) return;
+    box.setAttribute('role', 'button');
+    box.setAttribute('tabindex', '0');
+    box.title = '点开记忆星图 —— 全部 1371 个节点 / 5400 条关系';
+    box.addEventListener('click', openStar);
+    box.addEventListener('keydown', function(e){
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openStar(); }
+    });
+    if(starBack) starBack.addEventListener('click', closeStar);
+    document.addEventListener('keydown', function(e){
+      if(e.key === 'Escape' && starOpen) closeStar();
+    });
+    /* ?star=1 直接展开星图（截图 / 从 QQ 直接甩过来用） */
+    if(/[?&]star=1/.test(location.search)){
+      setTimeout(openStar, 900);
+    }
+  })();
   if(!cv) return;
   const cx = cv.getContext('2d');
   const W = cv.width, H = cv.height, C = W / 2, R = W / 2 - 8;
@@ -1759,9 +1844,14 @@ function renderClock(){
 
   let ang = 0;
 
-  function draw(){
+  let lastMindT = 0;
+  function draw(now){
     if(!pts){ requestAnimationFrame(draw); return; }
-    ang += 0.0022;
+    /* 小球只是"她那边有多少记忆"的指示器，20fps 完全够；
+       省下的主线程预算全给 Live2D 和星图。 */
+    if(now - lastMindT < 48){ requestAnimationFrame(draw); return; }
+    lastMindT = now;
+    ang += 0.0022 * 3;
     const cos = Math.cos(ang), sin = Math.sin(ang);
     const n = pts.length;
     const px = new Float32Array(n), py = new Float32Array(n), pz = new Float32Array(n);

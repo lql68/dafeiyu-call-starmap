@@ -45,7 +45,8 @@ raw_nodes = con.execute(
 ).fetchall()
 
 edge_rows = con.execute(
-    "select source_node_id as s, target_node_id as t, weight, confidence, relation_type"
+    "select source_node_id as s, target_node_id as t, weight, confidence, relation_type,"
+    " source_memory_id as mid"
     " from graph_edges where status is null or status = 'active'"
 ).fetchall()
 
@@ -122,6 +123,26 @@ def classify(node_type, value):
     return 6
 maxd = max((deg.get(n["id"], 0) for n in cand), default=1) or 1
 nodes = []
+
+# ── 给每个节点带一句「它关联的记忆原文」，供搜索与悬停用 ──
+mem_text = {}
+for r in con.execute("select parent_memory_id as pm, content from memory_atoms where status='active'"):
+    if r["pm"] is not None and r["pm"] not in mem_text:
+        mem_text[r["pm"]] = (r["content"] or "")
+
+node_mems = {}          # node_id -> [memory_id, ...]，按出现顺序去重
+for e in edge_rows:
+    mem = e["mid"] if "mid" in e.keys() else None
+    if mem is None:
+        continue
+    for side in ("s", "t"):
+        nid = e[side]
+        if nid not in keep:
+            continue
+        lst = node_mems.setdefault(nid, [])
+        if mem not in lst and len(lst) < 6:
+            lst.append(mem)
+node_mem = {k: v[0] for k, v in node_mems.items() if v}
 for n in cand:
     tidx = TYPES.index(n["node_type"]) if n["node_type"] in TYPES else len(TYPES) - 1
     value = (n["node_value"] or "").strip().replace("\n", " ")
@@ -140,7 +161,38 @@ for n in cand:
         "a": round(age_days(n["created_at"]), 1),
         "r": rad,
         "v": value,
+        # 它关联的那条记忆原文，供全文搜索与悬停提示用
+        "s": mem_text.get(node_mem.get(n["id"]), "")[:60],
+        "ms": [mem_text.get(m, "") for m in node_mems.get(n["id"], []) if mem_text.get(m)][:6],
     })
+
+# ── 人物关系：两个人若在同一条记忆里都出现过，就连一条线 ──
+# graph_edges 里 co_occurs_with 只有 2 条，靠它画不出关系网，
+# 所以走 source_memory_id：把每个 person 关联到的记忆 id 收集起来，两两求交集。
+ntype = {n["id"]: n["node_type"] for n in raw_nodes}
+person_mems = {}
+for e in edge_rows:
+    mem = e["mid"] if "mid" in e.keys() else None
+    if mem is None:
+        continue
+    if ntype.get(e["s"]) == "person":
+        person_mems.setdefault(e["s"], set()).add(mem)
+    if ntype.get(e["t"]) == "person":
+        person_mems.setdefault(e["t"], set()).add(mem)
+
+plinks = []
+pids = [pid for pid in person_mems if pid in keep]
+for x in range(len(pids)):
+    for y in range(x + 1, len(pids)):
+        a_id, b_id = pids[x], pids[y]
+        common = len(person_mems[a_id] & person_mems[b_id])
+        if common <= 0:
+            continue
+        a, b = keep[a_id], keep[b_id]
+        # 共现越多线越粗，5 条以上就顶格
+        plinks.append([a, b, round(min(1.0, 0.25 + common / 5.0), 3), common])
+
+print("   人物关系:", len(plinks), "对")
 
 links = []
 for e in edge_rows:
@@ -190,7 +242,7 @@ meta["links_shown"] = len(links)
 meta["max_degree"] = max((n["d"] for n in nodes), default=0)
 
 with open(OUT, "w", encoding="utf-8") as f:
-    json.dump({"meta": meta, "nodes": nodes, "links": links}, f,
+    json.dump({"meta": meta, "nodes": nodes, "links": links, "plinks": plinks}, f,
               ensure_ascii=False, separators=(",", ":"))
 
 print("导出 ->", OUT)

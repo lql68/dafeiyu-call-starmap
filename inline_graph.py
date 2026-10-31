@@ -7,7 +7,12 @@ JSON = r"D:\deepseek harness\ai-live\memory-graph.json"
 s = io.open(HTML, encoding="utf-8").read()
 g = json.load(io.open(JSON, encoding="utf-8"))
 
-blob = json.dumps(g, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+blob = (json.dumps(g, ensure_ascii=False, separators=(",", ":"))
+        .replace("</", "<\\/")
+        # U+2028 / U+2029 在 JSON 里合法、在 JS 字符串里是非法的行终止符，
+        # 记忆正文里偶尔出现，不转义会让整段脚本 SyntaxError
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029"))
 
 i = s.find("window.__GRAPH__ = ")
 assert i > 0, "找不到 __GRAPH__ 赋值"
