@@ -416,7 +416,7 @@ const HIDE_PARTS = ['Part19', 'Part26', 'Part74'];
 const PROP_PARAMS = [
   'key1','key2','key3','key4','key5','key6','key7','key8','key9','key10','key11','key12','key13',
   'Movement1','Movement2','Movement3',
-  'Clothes1','Clothes3','Clothes4','Param34','Param2'
+  'Clothes1','Clothes3','Clothes4','Param34','Param2','Param140'
 ];
 
 
@@ -1278,7 +1278,18 @@ if(location.search.indexOf('mouth=1') >= 0){
    Cubism Core 的 drawables.opacities 是 wasm 堆上的 Float32Array 视图，
    在 coreModel.update() 之后写 0，渲染器这一帧读到的就是 0。 */
 (function () {
-  var HIDE = [513, 514];
+  /* 这四个网格的贴图是「整块纯黑 + alpha 满」—— 正常美术不会这么画，
+     它们是小道具/图标/遮罩残留。253/383 左右对称成一组，513/514 落在脸中线。
+     不同分辨率、不同 idle 姿态下露出来的是哪一个不固定，所以四个一起关。 */
+  var HIDE = [253, 383, 513, 514];
+  var diag = null;
+  if (/[?&]diag=1/.test(location.search)) {
+    diag = document.createElement('div');
+    diag.style.cssText = 'position:fixed;left:12px;bottom:64px;z-index:60;font:11px/1.5 ui-monospace,Consolas,monospace;'
+      + 'color:#8fd8ff;background:rgba(4,12,22,.82);border:1px solid rgba(90,200,255,.35);'
+      + 'border-radius:6px;padding:6px 9px;white-space:pre;pointer-events:none';
+    document.body.appendChild(diag);
+  }
   var tries = 0;
   var timer = setInterval(function () {
     if (++tries > 300) { clearInterval(timer); return; }
@@ -1292,7 +1303,18 @@ if(location.search.indexOf('mouth=1') >= 0){
       orig(dt);
       try {
         var d = cm._model && cm._model.drawables;
-        if (d && d.opacities) for (var i = 0; i < HIDE.length; i++) d.opacities[HIDE[i]] = 0;
+        if (d && d.opacities) {
+          for (var i = 0; i < HIDE.length; i++) d.opacities[HIDE[i]] = 0;
+          if (diag) {
+            var ops = HIDE.map(function (k) {
+              return k + '=' + (d.opacities[k] === undefined ? '?' : d.opacities[k].toFixed(2));
+            }).join(' ');
+            window.__l2dDiag = '网格 ' + d.count + ' / 隐藏 ' + HIDE.length + '\n' + ops
+              + '\n画布 ' + (window.__l2d.app && window.__l2d.app.renderer
+                ? window.__l2d.app.renderer.width + 'x' + window.__l2d.app.renderer.height : '?');
+            diag.textContent = window.__l2dDiag;
+          }
+        }
       } catch (e) {}
     };
     console.log('[fix] 已屏蔽多余网格 ' + HIDE.join(','));

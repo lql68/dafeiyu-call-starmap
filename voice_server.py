@@ -720,6 +720,12 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_header("Cache-Control", "public, max-age=600")
             elif self.path.endswith(".json"):
                 self.send_header("Cache-Control", "no-store")
+            elif self.path.endswith((".html", ".htm", ".js", ".css")) or self.path in ("/", ""):
+                # 页面本体永远不缓存：改一次 js 就要立刻生效，不然浏览器拿旧版本，
+                # 会出现"我这边明明修好了、他那还在"的假象。
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
         except Exception:
             pass
         super().end_headers()
