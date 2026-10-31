@@ -102,11 +102,30 @@
   }
   Object.keys(LAYER_COLOR).forEach(function(k){ SPRITE[k] = makeSprite(LAYER_COLOR[k]); });
 
+  /* 星云用一张 192px 的柔性精灵：原来每个 topic 每帧都 createRadialGradient +
+     save/rotate/scale/arc/fill，244 个下来是主要的 CPU 开销，放大后填充面积还翻倍 */
+  SPRITE.nebula = (function(){
+    var S = 192;
+    var c = document.createElement('canvas');
+    c.width = c.height = S;
+    var g = c.getContext('2d');
+    var grad = g.createRadialGradient(S/2, S/2, 0, S/2, S/2, S/2);
+    grad.addColorStop(0.00, 'rgba(236,220,186,0.95)');
+    grad.addColorStop(0.35, 'rgba(214,186,146,0.50)');
+    grad.addColorStop(0.68, 'rgba(178,140,104,0.16)');
+    grad.addColorStop(1.00, 'rgba(150,120,90,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, S, S);
+    return c;
+  })();
+
   var NODES = [], LINKS = [];
   var PX, PY, PS, PZ;         // 每帧投影缓存
   var adj = [];               // 邻接表：选中时用
   var LAYER = [];             // 每个节点属于哪一层
   var DENS  = null;           // 每个节点的半径系数（球壳厚度）
+  var LENSED = null;          // 每个节点被引力透镜放大的程度（0~1）
+  var BHR = 0;                // 中央黑洞视界半径（frame 每帧算）
   var CLUSTER = null;         // 每个节点的方位密度（0.2 空洞 ~ 1.0 星系团）
   var hover = -1, picked = -1;
   var yaw = 0, pitch = -0.18, yawVel = 0.00030;
@@ -118,7 +137,7 @@
   var BUCKET = 4;             // 线分几档描（第 4 档 = 超级节点边，压暗）
   var lastT = 0, fpsAcc = 0, fpsN = 0, fpsShow = 0;
 
-  function resize(){    DPR = Math.min(2, window.devicePixelRatio || 1);
+  function resize(){    DPR = Math.min(1.25, window.devicePixelRatio || 1);   /* 2 会让画布到 3840×2160，放大时填满屏就掉帧 */
     W = cv.clientWidth; H = cv.clientHeight;
     cv.width  = Math.round(W * DPR);
     cv.height = Math.round(H * DPR);
@@ -152,6 +171,7 @@
         }
         LAYER = new Array(n);
         DENS  = new Float32Array(n);
+        LENSED = new Float32Array(n);
         for(var q = 0; q < n; q++){
           LAYER[q] = layerOf(NODES[q]);
           /* 确定性伪随机（sin 哈希）：让点不在同一层球壳上，
@@ -214,6 +234,25 @@
     PS[i] = s;
     PX[i] = CX + p[0] * sc;
     PY[i] = CY + p[1] * sc;
+
+    /* ── 引力透镜 ──
+       真实的透镜要屏幕空间光线弯曲；这里用径向挤压来近似：
+       落在黑洞影响半径内的点，越靠里被推得越远，于是球心的点会沿径向
+       摊成一圈，看起来就是背景星被拉到爱因斯坦环上。同时记下被放大的程度，
+       渲染时给它们加亮加长 —— 透镜本来就会放大背景。 */
+    LENSED[i] = 0;
+    if(BHR > 0){
+      var dxl = PX[i] - CX, dyl = PY[i] - CY;
+      var rl = Math.sqrt(dxl * dxl + dyl * dyl) || 0.001;
+      var edge = BHR * 2.30;
+      if(rl < edge){
+        var fl = rl / edge;
+        var push = 1 + 1.05 * Math.pow(1 - fl, 2.1);
+        PX[i] = CX + dxl * push;
+        PY[i] = CY + dyl * push;
+        LENSED[i] = Math.min(1, (1 - fl) * 1.5);
+      }
+    }
   }
 
   function frame(t){
@@ -227,37 +266,30 @@
     for(var i=0;i<NODES.length;i++) project(i);
 
     /* 背景 */
+    BHR = Math.min(W, H) * 0.062 * (0.62 + 0.38 * Math.min(1.6, zoom));
+
     ctx.fillStyle = '#05070C';
     ctx.fillRect(0, 0, W, H);
 
 
     /* ── 星云层：话题节点周围铺大而淡的暖色团，先用它做出"云雾底" ── */
-    for(var nb = 0; nb < NODES.length; nb++){
+    var nebN = 0;
+    for(var nb = 0; nb < NODES.length && nebN < 140; nb++){
       if(LAYER[nb] !== 'nebula') continue;
       var ndn = NODES[nb];
-      if((ndn.d || 0) < 6) continue;             // 太边缘的话题不铺，否则满屏糊
-      var nr = (26 + Math.log2(1 + ndn.d) * 13) * PS[nb];
-      var na = 0.090 * Math.max(0.25, PS[nb]);
+      if((ndn.d || 0) < 10) continue;          /* 只留有分量的話題：既省时间又不糊 */
+      nebN++;
+      var nr = Math.min(118, 26 + Math.log2(1 + ndn.d) * 13) * PS[nb];
+      var na = 0.105 * Math.max(0.25, PS[nb]);
       if(focusSet && focusSet.indexOf(nb) < 0) na *= 0.3;
-      /* 拉成竖直的气体柱，朝向按索引微抖 —— 一团团圆饼看不出"柱" */
-      var ang0 = ((nb * 137) % 360) * Math.PI / 180;
+      /* 竖柱：宽 = w/√k、高 = w·√k，面积不变，省掉 save/rotate/scale */
       var stretch = 1.55 + ((nb * 71) % 100) / 100 * 0.75;
-      ctx.save();
-      ctx.translate(PX[nb], PY[nb]);
-      ctx.rotate(ang0 * 0.12);
-      ctx.scale(1 / Math.sqrt(stretch), stretch / Math.sqrt(stretch));
-      var grd = ctx.createRadialGradient(0, 0, 0, 0, 0, nr);
-      grd.addColorStop(0, 'rgba(236,220,186,' + na.toFixed(3) + ')');
-      grd.addColorStop(0.42, 'rgba(214,186,146,' + (na * 0.52).toFixed(3) + ')');
-      grd.addColorStop(0.75, 'rgba(178,140,104,' + (na * 0.20).toFixed(3) + ')');
-      grd.addColorStop(1, 'rgba(150,120,90,0)');
-      ctx.fillStyle = grd;
-      ctx.beginPath();
-      ctx.arc(0, 0, nr, 0, 6.2832);
-      ctx.fill();
-      ctx.restore();
+      var sq = Math.sqrt(stretch);
+      var wN = nr * 2 / sq, hN = nr * 2 * stretch / sq;
+      ctx.globalAlpha = Math.min(1, na * 2.4);
+      ctx.drawImage(SPRITE.nebula, PX[nb] - wN * 0.5, PY[nb] - hN * 0.5, wN, hN);
+      ctx.globalAlpha = 1;
     }
-
     /* 线：按深度分档，每档一次 beginPath */
     var buckets = [];
     for(var b=0;b<BUCKET;b++) buckets.push([]);
@@ -351,7 +383,8 @@
         var rr0 = (0.62 + Math.log2(1 + deg) * 0.20) * s2 * (0.72 + 0.40 * (CLUSTER ? CLUSTER[idx] : 1));
         if(rr0 < 0.28) rr0 = 0.28;
         var cw = CLUSTER ? CLUSTER[idx] : 1;
-        var a0 = Math.min(0.95, (0.58 + Math.max(0, 1 - Math.min(1, (nd.a || 0) / 8)) * 0.26) * dim * (0.30 + 0.70 * cw));
+        var lz = LENSED ? LENSED[idx] : 0;
+        var a0 = Math.min(1, (0.58 + Math.max(0, 1 - Math.min(1, (nd.a || 0) / 8)) * 0.26) * dim * (0.30 + 0.70 * cw) * (1 + lz * 1.4));
         ctx.globalAlpha = a0;
         ctx.fillStyle = 'rgba(' + LAYER_COLOR.dust + ',1)';
         ctx.beginPath();
@@ -373,10 +406,10 @@
       }
 
       /* 恒星 / 人：大光晕 + 星芒 */
-      var rr2 = (1.45 + Math.log2(1 + deg) * 0.48) * s2;
+      var rr2 = (1.28 + Math.log2(1 + deg) * 0.44) * s2;
       if(rr2 < 0.7) rr2 = 0.7;
       var fresh = Math.max(0, 1 - Math.min(1, (nd.a || 0) / 8)) * 0.30;
-      var a2 = Math.min(1, (0.92 + fresh) * dim * (0.7 + s2 * 0.4));
+      var a2 = Math.min(1, (0.62 + fresh) * dim * (0.7 + s2 * 0.4));
       var sp2 = (nd.k === 'person') ? SPRITE.person : SPRITE.star;
       var d2 = rr2 * 7.0;
       ctx.globalAlpha = a2;
@@ -420,7 +453,7 @@
       ctx.beginPath();
       ctx.moveTo(PX[h] - l4, PY[h]); ctx.lineTo(PX[h] + l4, PY[h]);
       ctx.moveTo(PX[h], PY[h] - l4); ctx.lineTo(PX[h], PY[h] + l4);
-      ctx.strokeStyle = 'rgba(255,226,178,' + (0.30 * dimh).toFixed(3) + ')';
+      ctx.strokeStyle = 'rgba(255,226,178,' + (0.20 * dimh).toFixed(3) + ')';
       ctx.lineWidth = 0.9;
       ctx.stroke();
     }
@@ -430,7 +463,7 @@
        环是不对称的 —— M87 里朝向我们的一侧被相对论性集束打亮，所以下半圈更白。
        它不参与图数据，纯装饰，任何节点都不会画在这上面。 */
     (function(){
-      var rr = Math.min(W, H) * 0.062 * (0.62 + 0.38 * Math.min(1.6, zoom));
+      var rr = BHR;
       var tilt = -0.42;                       /* 盘面倾角，让它看着是"斜着看一个盘" */
 
       /* 外层引力辉光 */
@@ -449,10 +482,10 @@
       /* 盘：外层暗橙 → 内层白热 */
       var ringR = rr * 1.10;
       var g1 = ctx.createRadialGradient(0, 0, ringR * 0.62, 0, 0, ringR * 1.20);
-      g1.addColorStop(0.00, 'rgba(255,246,232,0)');
-      g1.addColorStop(0.42, 'rgba(255,232,196,0.85)');
-      g1.addColorStop(0.62, 'rgba(255,168,96,0.72)');
-      g1.addColorStop(0.86, 'rgba(196,92,44,0.34)');
+      g1.addColorStop(0.00, 'rgba(255,250,240,0)');
+      g1.addColorStop(0.40, 'rgba(255,242,214,1)');
+      g1.addColorStop(0.62, 'rgba(255,176,104,0.88)');
+      g1.addColorStop(0.86, 'rgba(206,100,48,0.42)');
       g1.addColorStop(1.00, 'rgba(150,64,30,0)');
       ctx.strokeStyle = g1;
       ctx.lineWidth = rr * 0.34;
