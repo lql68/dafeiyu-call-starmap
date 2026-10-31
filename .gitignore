@@ -40,3 +40,4 @@ tts/refs/cover_full.wav
 
 # 背景选择是运行时状态
 /bg/current.txt
+svc/paused.flag
