@@ -841,9 +841,15 @@ function say(text){
 }
 
 async function speak(text){
-  if(!text || text === lastSpoken) return;
+  if(!text) return;
+  /* 防抖，不是去重：以前是「和上一句一模一样就永远不说」，
+     结果她重复一句真心话（"啃饼干呢"）时会被整段吞掉，页面看着像没回答。
+     现在只在 1.5 秒内重复才挡。 */
+  if(text === lastSpoken && (performance.now() - lastSpokeAt) < 1500) return;
   lastSpoken = text;
   lastSpokeAt = performance.now();
+  curText = text;                       // 先上字幕，后面出任何问题至少能看到字
+  subT0 = performance.now();
   try{
     const r = await fetch('/api/say', {
       method:'POST',
@@ -852,17 +858,27 @@ async function speak(text){
     });
     if(!r.ok){
       const j = await r.json().catch(()=>({}));
+      console.warn('[speak] /api/say ' + r.status + ' ' + JSON.stringify(j).slice(0, 200));
       fallbackSub(text, false);
       return;
     }
     const j = await r.json();
+    console.log('[speak] ok ' + j.url + ' dur=' + j.dur);
     curText = text; curDur = j.dur || 2.2;
     subT0 = performance.now();
     audioEl.src = j.url;
     audioEl.currentTime = 0;
-    await audioEl.play();
-    playing = true;
+    try{
+      await audioEl.play();
+      playing = true;
+    }catch(err){
+      /* 没有音频设备（无头浏览器）或自动播放被拦：字幕照样走完，别让「说不出话」
+         看起来像「没回答」。真机上这里一般不会进。 */
+      console.warn('[speak] play() 失败，只上字幕：' + err.message);
+      playing = true;
+    }
   }catch(e){
+    console.error('[speak] 失败：' + e.message);
     fallbackSub(text, false);
   }
 }
