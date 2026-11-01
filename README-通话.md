@@ -275,11 +275,11 @@ ASTRBOT_TIMEOUT = int(os.environ.get("AI_LIVE_ASTRBOT_TIMEOUT", "25"))
 | 环节 | 结果 |
 |---|---|
 | `GET /health` | `{"ok":true,"provider":"deepseek/deepseek-flash","persona":"大肥鱼"}` |
-| `POST /turn` 「我今天加班到现在，头有点疼」 | 1356ms → 「诶，这么晚才回。头疼先揉揉太阳穴，别硬撑着。」 |
-| `POST /turn` 空文本（她主动开口） | 1407ms → 「爸，还不说话，是不是困啦？」 |
+| `POST /turn` 一句抱怨累的测试句 | 1356ms → （回了一句关心的话，内容略） |
+| `POST /turn` 空文本（她主动开口） | 1407ms → （主动说了半句，内容略） |
 | `POST /api/think` | 1288ms → `model=astrbot/大肥鱼` |
 | `POST /api/say` → TTS | 9360ms（首次含 warmup）→ 3.17s wav |
-| 整页连跑 | 接话 1694ms，字幕打出「诶，那你岂不是淋雨了？快先去换身干衣服，别感冒了。」 |
+| 整页连跑 | 接话 1694ms，字幕正常打出她的回复（内容略） |
 ---
 
 ## 接 AstrBot 的长期记忆（livingmemory）
@@ -295,7 +295,7 @@ ASTRBOT_TIMEOUT = int(os.environ.get("AI_LIVE_ASTRBOT_TIMEOUT", "25"))
                                       ↓ star_map 找 LivingMemoryPlugin
                         livingmemory.memory_engine.search_memories(
                             query=他说的这句, k=5,
-                            session_id=napcat:FriendMessage:2011324722)
+                            session_id=napcat:FriendMessage:<你的 QQ 号>)
                                       ↓ 拼成 5 条 → 塞进 system prompt
                                deepseek-flash + 大肥鱼人格 → 回话
 ```
@@ -304,19 +304,21 @@ ASTRBOT_TIMEOUT = int(os.environ.get("AI_LIVE_ASTRBOT_TIMEOUT", "25"))
 
 | 键 | 值 | 说明 |
 |---|---|---|
-| `session_umo` | `napcat:FriendMessage:2011324722` | 用哪份会话的记忆/人格；这是你和她的私聊 |
+| `session_umo` | `napcat:FriendMessage:<你的 QQ 号>` | 用哪份会话的记忆/人格；这是你和她的私聊 |
 | `memory_enabled` | `true` | 关掉就退回「无记忆」模式 |
 | `memory_top_k` | `5` | 每次捞几条 |
 | `memory_timeout` | `8` | 超时就当没记忆，绝不拖慢接话 |
 
 **实测**（每轮注入 5 条，接话总耗时 1.3–1.9 秒）
 
-| 他说 | 她回 | 来源 |
+| 问什么 | 她的表现 | 来源 |
 |---|---|---|
-| 上次我说想吃什么来着 | 你上次说的是青椒炒肉吧？还是那个酱油炒饭，我记混了？ | 记忆库 |
-| 你还记得我前几天干了啥吗 | 你那天又破戒了，还送了花。脚本最后跑起来没？ | 记忆库 |
-| 你上次说想养什么来着 | 小鲸鱼呀，不过我就随口一说。 | 记忆库 |
-| （没说话，历史里刚提过直播脚本） | 脚本那边都准备好了吗，要不要我明天帮你盯着点。 | 上下文 |
+| 「上次我说想吃什么来着」 | 说出一个具体菜名，其中一处记混了 | 记忆库 |
+| 「你还记得我前几天干了啥吗」 | 提到了那件事的两个细节，还追问了一句 | 记忆库 |
+| 「你上次说想养什么来着」 | 准确说出那个东西 | 记忆库 |
+| （她主动开口，上下文刚提过某个工具） | 顺着上下文接了一句 | 上下文 |
+
+> 具体对话内容略 —— 那是真实记忆库跑出来的，不适合放进公开仓库。
 
 **三个坑**
 
@@ -471,7 +473,7 @@ D:\sakana-py\python.exe -m pip install --target "D:\sakana-py\mp" mediapipe
    否则退回鼠标跟随）；眼珠跟着他的眼珠（`ParamEyeBallX/Y`）
 3. `voice_server.py` 的 `think()`：把「他在笑 / 他低头 / 他眯着眼像是困了 / 镜头里没看到他的脸」
    拼进场景串，所以接话会真的用上这些。实测：`eyes_open 0.3` →
-   「唔……看你眼睛都快合上了，还撑着。要不早点躺下？」
+   （她据此说了句「看你要不要早点躺下」意思的话）
 
 ### 标定过的坑
 

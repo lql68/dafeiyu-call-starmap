@@ -72,3 +72,7 @@ memstarmap/data/graph.json
 *.bak
 *.bak2
 *.bak-*
+
+# 本地私有数据，永不入库
+/.private/
+/starmap.memory.html
